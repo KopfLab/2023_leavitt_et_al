@@ -1,0 +1,156 @@
+---
+title: "Tables"
+date: "Last knitted on `r format(Sys.Date(), '%d %b %Y')`"
+author: "Sebastian Kopf, William Leavitt, Ann Pearson, Yuki Weber"
+output:
+  html_document: 
+    df_print: paged
+    number_sections: yes
+    toc: yes
+    toc_float: true
+    toc_depth: 3
+    code_folding: show
+editor_options:
+  chunk_output_type: console # switch to 'inline' if preferred
+---
+
+# Setup
+
+```{r "setup", message = FALSE}
+# packages
+library(rlang)
+library(tidyverse) # general data wrangling and plotting
+
+# custom funtions
+source("scripts/error_propagation.R")
+source("scripts/table_functions.R")
+
+# global knitting options for code rendering
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+> NOTE: please knit the `01_calculations.Rmd` notebook first to prepare the data used for generating the tables.
+
+
+# Load Data
+
+```{r, eval = TRUE}
+# load data
+compounds <- readxl::read_excel("data/compounds.xlsx")
+metadata <- readxl::read_excel("data/metadata.xlsx")
+samples <- readr::read_rds("cache/samples_w_epsilons.rds") 
+samples_w_epsilons <- readr::read_rds("cache/samples_w_epsilons.rds")
+samples_sum <- readr::read_rds("cache/samples_sum.rds")
+samples_ab_weighted_sum <- readr::read_rds("cache/samples_ab_weighted_sum.rds")
+ring_enrichments <- readr::read_rds("cache/ring_enrichments.rds")
+```
+
+# Table 1: abundance-weighted data summary
+
+```{r}
+
+```
+
+
+# Table S1: biphytanes data summary
+
+```{r}
+# save in data output
+table_s1 <- samples_sum  %>%
+  left_join(compounds, by = "compound") %>%
+  left_join(metadata, by = c("organism", "growth")) %>%
+  left_join(ring_enrichments, by = c("organism", "growth", "compound")) %>%
+  arrange(TD.hours, compound) %>%
+  rename(d2H.permil = d2H_weighted_mean.permil, eps.permil = eps_weighted_mean.permil) %>%
+  pivot_wider(
+    id_cols = c(organism, growth, TD.hours, n_analyses, d2H_water.permil),
+    values_from = c(
+      starts_with("d2H.permil"), starts_with("d2H_error"),
+      starts_with("eps"), starts_with("rel_abundance"), 
+      D_eps_per_ring),
+    names_from = bp_short,
+    names_glue = "{bp_short}: {.value}"
+  ) %>%
+  left_join(samples_ab_weighted_sum, by = c("organism", "growth")) %>%
+  select(TD.hours, n_analyses, d2H_water.permil, 
+         starts_with("BP-0"), starts_with("BP-1"), starts_with("BP-2"), starts_with("BP-3"),
+         eps_ab_weighted_mean.permil, eps_ab_weighted_mean_error.permil
+  )
+
+table_s1_formatted <-
+  table_s1 %>% 
+  transmute(
+    TD.hours = sprintf("%.1f", TD.hours),
+    n_analyses = n_analyses,
+    d2H_water.permil = sprintf("%.1f", d2H_water.permil),
+    `BP-0: d2H.permil` = sprintf("%.0f \U00B1 %.0f", `BP-0: d2H.permil`,  `BP-0: d2H_error.permil`),
+    `BP-0: eps.permil` = sprintf("%.0f \U00B1 %.0f", `BP-0: eps.permil`,  `BP-0: eps_error.permil`),
+    `BP-1: d2H.permil` = sprintf("%.0f \U00B1 %.0f", `BP-1: d2H.permil`,  `BP-1: d2H_error.permil`),
+    `BP-1: eps.permil` = sprintf("%.0f \U00B1 %.0f", `BP-1: eps.permil`,  `BP-1: eps_error.permil`),
+    `BP-1: Deps.permil` = sprintf("%.1f", `BP-1: D_eps_per_ring`),
+    `BP-2: d2H.permil` = sprintf("%.0f \U00B1 %.0f", `BP-2: d2H.permil`,  `BP-2: d2H_error.permil`),
+    `BP-2: eps.permil` = sprintf("%.0f \U00B1 %.0f", `BP-2: eps.permil`,  `BP-2: eps_error.permil`),
+    `BP-2: Deps.permil` = sprintf("%.1f", `BP-2: D_eps_per_ring`),
+    `BP-3: d2H.permil` = sprintf("%.0f \U00B1 %.0f", `BP-3: d2H.permil`,  `BP-3: d2H_error.permil`),
+    `BP-3: eps.permil` = sprintf("%.0f \U00B1 %.0f", `BP-3: eps.permil`,  `BP-3: eps_error.permil`),
+    `BP-3: Deps.permil` = sprintf("%.1f", `BP-3: D_eps_per_ring`),
+    `BP-0: rel_abundance` = sprintf("%.0f \U00B1 %.0f", 100 * `BP-0: rel_abundance_mean`, 100 * `BP-0: rel_abundance_error`),
+    `BP-1: rel_abundance` = sprintf("%.0f \U00B1 %.0f", 100 * `BP-1: rel_abundance_mean`, 100 * `BP-1: rel_abundance_error`),
+    `BP-2: rel_abundance` = sprintf("%.0f \U00B1 %.0f", 100 * `BP-2: rel_abundance_mean`, 100 * `BP-2: rel_abundance_error`),
+    `BP-3: rel_abundance` = sprintf("%.0f \U00B1 %.0f", 100 * `BP-3: rel_abundance_mean`, 100 * `BP-3: rel_abundance_error`),
+    eps_ab_weighted_mean = sprintf("%.0f \U00B1 %.0f", eps_ab_weighted_mean.permil, eps_ab_weighted_mean_error.permil)
+  )
+
+export_to_excel(`numbers` = table_s1, `formatted` = table_s1_formatted, file = "output/table_S1_data_summary.xlsx")
+```
+
+```{r}
+# range and means
+message("Fractionation factors range and means: ")
+samples_sum %>%
+  summarise(
+    min_eps = min(eps_weighted_mean.permil), 
+    max_eps = max(eps_weighted_mean.permil), 
+    mean_eps = mean(eps_weighted_mean.permil), 
+    sd = sd(eps_weighted_mean.permil) %>% round()
+  )
+
+# mean ring enrichment
+message("Mean ring enrichments: ")
+ring_enrichments %>% 
+  summarize(
+    mean_ring_enrichment = mean(D_eps_per_ring) %>% round(1), 
+    sd = sd(D_eps_per_ring) %>% round(1)
+  )
+```
+
+
+# Table S2: all data
+
+```{r}
+samples_w_epsilons %>%
+  left_join(compounds, by = "compound") %>%
+  left_join(metadata, by = c("organism", "growth")) %>%
+  arrange(organism, growth, analysis, compound) %>%
+  group_by(organism, growth) %>%
+  mutate(
+    # renumber analyses for clarity
+    analysis = setNames(1:length(unique(analysis)), paste(unique(analysis)))[paste(analysis)],
+    n_integrations = as.integer(n_integrations)
+  ) %>% 
+  ungroup() %>%
+  # columns for the export table)
+  select(
+    growth, TD.hours, 
+    analysis, 
+    compound = bp_short,
+    rt.s = rt, amp2.mV, amp3.mV, 
+    area2.Vs, area3.Vs, area_all.Vs,
+    n_integrations, rel_abundance,
+    raw_d2H.permil, corrected_d2H.permil, corrected_d2H_error.permil,
+    d2H_water.permil, eps_2H_lipid_water.permil, eps_2H_lipid_water_error.permil
+  ) %>%
+  export_to_excel(file = "output/table_S2_all_data.xlsx")
+```
+
+

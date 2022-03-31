@@ -1,0 +1,573 @@
+---
+title: "Figures"
+author: "Sebastian Kopf, William Leavitt, Ann Pearson, Yuki Weber"
+date: "Last knitted on `r format(Sys.Date(), '%d %b %Y')`"
+output:
+  html_document:
+    df_print: paged
+    number_sections: no
+    toc: yes
+    toc_float: yes
+    toc_depth: 3
+    code_folding: show
+  word_document:
+    toc: yes
+    toc_depth: '3'
+editor_options:
+  chunk_output_type: console
+---
+
+# Setup
+
+```{r "setup", message = FALSE, echo = FALSE}
+# packages
+library(tidyverse) # general data wrangling and plotting
+library(latex2exp) # typesetting of latex math
+library(cowplot) # plot arrangement
+library(egg) # plot arrangement
+library(magick) # combine figures
+
+# scripts
+source("scripts/table_functions.R")
+source("scripts/plotting_functions.R")
+
+# global knitting options for code rendering
+knitr::opts_chunk$set(
+  eval = TRUE, echo = FALSE,
+  collapse = TRUE, comment = "#>",
+  dev = c("png", "pdf"),
+  dev.args = list(pdf = list(encoding = "WinAnsi", useDingbats = FALSE)),
+  fig.keep = "all",
+  fig.path = file.path("plots", "figure_")
+)
+```
+
+> NOTE: please knit the `01_calculations.Rmd` notebook first to prepare the data used for plotting.
+
+# Load data
+
+```{r, eval = TRUE}
+# load data
+calibration_standards <- readxl::read_excel("data/calibration_standards.xlsx")
+internal_standard <- readxl::read_excel("data/internal_standard.xlsx") %>%
+  mutate(abs_err = abs(calibrated_d2H.permil - true_d2H.permil)) %>%
+  arrange(amp2.mV)
+compounds <- readxl::read_excel("data/compounds.xlsx")
+metadata <- readxl::read_excel("data/metadata.xlsx")
+samples <- readr::read_rds("cache/samples_w_epsilons.rds") %>%
+  left_join(compounds, by = "compound") %>%
+  left_join(metadata, by = c("organism", "growth"))
+samples_sum <- readr::read_rds("cache/samples_sum.rds") %>%
+  left_join(compounds, by = "compound") %>%
+  left_join(metadata, by = c("organism", "growth"))
+chromatograms <- readr::read_rds("cache/chromatograms.rds")
+growth_regs <- readr::read_rds("cache/growth_regs.rds")
+```
+
+# Plotting constants
+
+```{r, eval = TRUE}
+bp_colors <- c("#D55E00", "#009E73", "#56B4E9", "#E69F00")
+bp_shapes <- c(23, 21, 22, 24)
+```
+
+# Figure 1: chromatography & structures
+
+```{r "1", fig.width=9, fig.height=7, warning = FALSE, eval = FALSE}
+p_chroms <- chromatograms %>%
+  # show only mass 2 trace across the paks rt widow
+  filter(mass == "m2", time.s >= 1100, time.s <= 1300) %>%
+  ggplot() +
+  aes(time.s, signal.mV/1000) + 
+  # data
+  geom_line(color = "dark gray") +
+  geom_ribbon(
+    data = function(df) filter(df, !is.na(peak)),
+    map = aes(fill = peak, ymin = bgrd2.mV/1000, ymax = signal.mV/1000),
+    show.legend = FALSE
+  ) +
+  # peak labels
+  geom_text(
+    data = function(df) {
+      df %>%
+        filter(!is.na(peak)) %>%
+        group_by(peak, mass) %>%
+        summarize(
+          apex.mV = max(signal.mV),
+          apex.s = time.s[signal.mV == max(signal.mV)],
+          .groups = "drop")
+    },
+    map = aes(y = apex.mV/1000, x = apex.s, label = peak, color = peak),
+    vjust = -0.5, show.legend = FALSE
+  ) +
+  # ghost points to get legend right
+  geom_point(
+    data = function(df) df %>% filter(!is.na(peak)) %>% select(peak) %>% unique(),
+    map = aes(x = Inf, y = Inf, fill = peak, shape = peak),
+    size = 0
+  ) +
+  # scales
+  scale_y_continuous(expand = c(0, 0), breaks = 2*0:5) + expand_limits(y = c(0, 10)) +
+  scale_x_continuous(
+    breaks = c(19:21) * 60, expand = c(0, 0),
+    labels = function(x) sprintf("%.0f s / %.0f min", x, x/60)
+  ) +
+  scale_fill_manual(values = c(bp_colors, tail(bp_colors, 1))) +
+  scale_color_manual(values = c(bp_colors, tail(bp_colors, 1))) +
+  scale_shape_manual(values = c(bp_shapes, tail(bp_shapes, 1))) +
+  # themes and labels
+  theme_figure(legend = TRUE, grid = FALSE) +
+  theme( # to get spacing right for the structures
+    legend.key.height = unit(0.16, "npc"),
+    legend.spacing = unit(0, "npc"),
+    legend.margin = margin(l = 0.1, t = 0, unit = "npc"),
+    legend.justification = "top",
+    plot.margin = margin(t = 0.1, unit = "npc")
+  ) +
+  labs(x = "retention time", y = "intensity [V]",
+       shape = NULL, color = NULL, fill = NULL) +
+  # larger lgend entries
+  guides(shape = guide_legend(override.aes = list(size = 4)))
+
+# combine chromatograms with structure drawings
+plot_grid(
+  p_chroms + theme(legend.position = "none"),
+  plot_grid(
+    get_legend(p_chroms),
+    ggdraw() + draw_image("figures/biphytanes.pdf"),
+    nrow = 1, rel_widths = c(1, 9)
+  ),
+  ncol = 1, rel_heights = c(2, 3)
+)
+```
+
+
+# Figure 2: data overview plot
+
+```{r "2", fig.width=8, fig.height=6, warning = FALSE, eval = TRUE}
+# plot data frame with shift ranges
+plot_df <- 
+  samples_sum %>%
+  mutate(
+    shift = 3,
+    TD.hours_min = min(TD.hours - (1.5 + parse_number(bp_short)) * shift),
+    TD.hours_max = max(TD.hours - (1.5 + parse_number(bp_short)) * shift)
+  ) %>%
+  ungroup()
+
+# plot
+p_2 <- 
+  plot_df %>%
+  ggplot() +
+  # doubling time indicators (vertical dashed lines)
+  geom_vline(
+    data = function(df) df %>% select(TD.hours) %>% unique(),
+    map = aes(xintercept = TD.hours), linetype = 2
+  ) + 
+  # doubling time group indicators (gray back panels)
+  geom_rect(
+    data = function(df) df %>% select(TD.hours, shift) %>% unique(),
+    map = aes(xmin = TD.hours - 2 * shift, xmax = TD.hours + 1.75 * shift, 
+               ymin = -Inf, ymax = Inf),
+    fill = "gray", alpha = 0.5
+  ) +
+  # analyses numbers
+  geom_text(
+    data = function(df) df %>% select(TD.hours, n_analyses) %>% unique(),
+    map = aes(x = TD.hours, y = -Inf, label = sprintf("n = %d", n_analyses)),
+    hjust = 0.5, vjust = -0.5, size = 5, fontface = "bold"
+  ) +
+  # fit line
+  geom_line(
+    data = function(df) {
+      df %>% select(organism, TD.hours_min, TD.hours_max) %>%
+        unique() %>%
+        left_join(growth_regs, by = "organism") %>%
+        mutate(
+          fit_line = pmap(list(fit, TD.hours_min, TD.hours_max), function(fit, hrs_min, hrs_max) {
+            fit_hrs <- seq(hrs_min, hrs_max, length.out = 10)
+            fit_pred <- predict(fit, newdata = data.frame(TD.hours = fit_hrs), se.fit = TRUE)
+            tibble(
+              TD.hours = fit_hrs,
+              eps.permil = fit_pred$fit,
+              eps_error.permil = fit_pred$se.fit
+            )
+          })
+        ) %>%
+        select(organism, fit_line) %>%
+        unnest(fit_line)
+    },
+    mapping = aes(x = TD.hours, y = eps.permil), size = 1
+  ) + 
+  # regression line info
+  geom_text(
+    data = function(df) {
+      df %>% select(organism, TD.hours_min, TD.hours_max) %>%
+        unique() %>%
+        left_join(growth_regs, by = "organism") %>%
+        mutate(
+          label = sprintf("$\\overset{%.1f \\pm %.1f \U2030\\,/\\,hour}{R^2:\\,%.2f,\\,p-value:\\,%s}$", 
+                          estimate, std.error, adj.r.squared, format_with_signif(p.value, 1)) %>%
+            latex2exp::TeX() %>% as.character()
+        )
+    },
+    mapping = aes(x = 70, y = -270, label = label),
+    parse = TRUE, hjust = 0.5, size = 5
+  ) + 
+  # error bars
+  geom_errorbar(
+    map = aes(
+      x = TD.hours - (1.5 + parse_number(bp_short)) * shift, 
+      color = bp_short,
+      ymin = eps_weighted_mean.permil -  eps_error.permil, 
+      ymax = eps_weighted_mean.permil +  eps_error.permil),
+    width = 1, show.legend = FALSE
+  ) +
+  # scales
+  scale_x_continuous(breaks = 0:5*20) + 
+  scale_y_continuous(breaks = -10 * 10:30) +
+  scale_fill_manual(values = bp_colors) +
+  scale_color_manual(values = bp_colors) +
+  scale_shape_manual(values = bp_shapes) +
+  # theme
+  theme_figure(grid = FALSE) + 
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    plot.margin = margin(r = 0.1, unit = "npc")
+  ) +
+  labs(
+    x = TeX("$T_D\\,\\[hours\\]$"),
+    y = TeX("$^2\\epsilon_{L/W}\\,\\[\U2030\\]$"),
+    shape = "biphytane", fill = "biphytane", color = "biphytane"
+  ) + 
+  # make the legend symbols larger
+  guides(
+    size = guide_legend(override.aes = list(shape = 21)), 
+    shape = guide_legend(override.aes = list(size = 4))
+  ) + 
+  geom_point(
+    map = aes(
+      x = TD.hours - (1.5 + parse_number(bp_short)) * shift, 
+      y = eps_weighted_mean.permil, 
+      shape = bp_short, fill = bp_short),
+    size = 5
+  ) 
+
+p_2
+```
+
+# Figure 7: data with model fits
+
+Data points seized by the relative abundance of the different biphytanes. See Figure S5 for details visualization of the relative abundances.
+
+```{r "8", fig.width=6.5, fig.height=5, warning = FALSE}
+# simple model for ring enrichment
+eps_model <-
+  tribble(
+    ~organism, ~gr_effect.permil_p_hr, ~ring_effect.permil, ~bp0_intercept.permil,
+    "Nmar",    0.1,                    5.6,                 -280,
+  )
+samples_sum_w_model <- 
+  samples_sum %>%
+  left_join(eps_model, by = "organism")
+
+generate_model_fits <- function(df) {
+  df %>% 
+    mutate(
+      eps_weighted_mean.permil = 
+        bp0_intercept.permil - parse_number(bp_short) * ring_effect.permil +
+        gr_effect.permil_p_hr * TD.hours
+    )
+}
+
+# plot
+p_7 <- 
+  samples_sum_w_model %>%
+  ggplot() +
+  aes(x = TD.hours, y = eps_weighted_mean.permil, shape = bp_short, color = bp_short, fill = bp_short) +
+  # model fit points
+  geom_point(
+    data = generate_model_fits,
+    size = 7, shape = 16, show.legend = FALSE, fill = NA
+  ) +
+  geom_point(
+    data = generate_model_fits,
+    size = 5.5, shape = 16, color = "white", show.legend = FALSE, 
+  ) +
+  # error bars
+  geom_errorbar(
+    map = aes(ymin = eps_weighted_mean.permil -  eps_error.permil, 
+              ymax = eps_weighted_mean.permil +  eps_error.permil),
+    width = 1, show.legend = FALSE
+  ) +
+  # model fits
+  geom_abline(
+    data = function(df) {
+      df %>% select(bp_short, gr_effect.permil_p_hr, ring_effect.permil, bp0_intercept.permil) %>%
+        unique() %>%
+        mutate(intercept = bp0_intercept.permil - parse_number(bp_short) * ring_effect.permil)
+    },
+    map = aes(intercept = intercept, slope = gr_effect.permil_p_hr, color = bp_short),
+    linetype = 3, size = 1, show.legend = FALSE
+  ) +
+  # data points
+  geom_point(size = 5, color = "black") +
+  # scales
+  scale_fill_manual(values = bp_colors) +
+  scale_color_manual(values = bp_colors) +
+  scale_shape_manual(values = bp_shapes) +
+  scale_y_continuous(breaks = -10 * 10:40) +
+  scale_x_continuous(breaks = 0:6*20) +
+  # theme
+  theme_figure(grid = FALSE) + 
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank()
+  ) +
+  labs(
+    x = TeX("$T_D\\,\\[hours\\]$"),
+    y = TeX("$^2\\epsilon_{L/W}\\,\\[\U2030\\]$"),
+    shape = "biphytane", fill = "biphytane", color = "biphytane"
+  ) + 
+  # make the legend symbols larger
+  guides(
+    size = guide_legend(override.aes = list(shape = 21)), 
+    shape = guide_legend(override.aes = list(size = 4))
+  )
+
+p_7
+```
+
+# Figure S1: calibration model summary
+
+```{r "S1", fig.width = 8, fig.height = 7, warning=FALSE}
+# load data unique to this plot
+calibration_standards <- readxl::read_excel("data/calibration_standards.xlsx")
+
+# root means square error
+rmse <- calibration_standards %>%
+  group_by(calibration) %>%
+  summarize(
+    n = n(), 
+    rmse = sqrt(mean((calibrated_d2H.permil - true_d2H.permil)^2, na.rm = TRUE)) %>%
+      round(2),
+    .groups = "drop"
+  )
+rmse %>% knitr::kable()
+
+# plot
+calibration_standards %>%
+  mutate(
+    panel = as_factor(calibration) %>%
+      fct_relevel("model.simple") %>%
+      fct_recode(
+        "$\\delta^2H_{raw} = \\beta_0 + \\beta_1 \\delta^2H_{calib}$" = "model.simple",
+        "$\\delta^2H_{raw} = \\beta_0 + \\beta_1 \\delta^2H_{calib} + \\beta_2 A$" = "model.amp",
+        "$\\delta^2H_{raw} = \\beta_0 + \\beta_1 \\delta^2H_{calib} + \\beta_2 A + \\beta_3 \\sqrt{A}$" = "model.amp.amp.sqrt",
+        "$\\delta^2H_{raw} = \\beta_0 + \\beta_1 \\delta^2H_{calib} + \\beta_2 A + \\beta_3 \\delta^2H_{calib} \\sqrt{A}$" = "model.amp.amp.sqrt.cross"
+      )
+  ) %>%
+  ggplot() + 
+  aes(amp2.mV/1000, residual_d2H.permil, color = true_d2H.permil) +
+  geom_point(alpha = 0.5) +
+  facet_wrap(~panel, labeller = latex_labeller) +
+  scale_x_log10() + 
+  scale_color_continuous(labels = function(x) paste0(x, "\U2030")) +
+  coord_cartesian(xlim = c(0.4, 50)) +
+  theme_figure() +
+  theme(
+    aspect.ratio = 1,
+    strip.text = element_text(size = 10)
+  )  +
+  geom_hline(yintercept = 0, linetype = "dotted", color ="gray30") +
+  geom_text(
+    data = function(df) {
+      df %>% select(calibration, panel) %>%
+        unique() %>%
+        left_join(rmse, by = "calibration")
+    },
+    mapping = aes(x = Inf, y = Inf, color = NULL, label = sprintf("RMSE: %.1f\U2030", rmse)),
+    hjust = 1.1, vjust = 1.5
+  ) +
+  labs(
+    color = TeX("$\\delta^2H$"),
+    x = "mass 2 amplitude (A) in V",
+    y = TeX("standard ($nC_{15-30}$) residuals in \U2030")
+  )
+
+```
+
+# Figure S2: absolute error estimates
+
+
+```{r "S2", fig.width = 8, fig.height = 6, warning=FALSE}
+# create estimator for absolute error based on the internal standard
+abs_err_model <- loess(
+  formula = abs_err ~ amp2.mV,
+  data = internal_standard,
+  span = 0.75
+)
+calculate_abs_error <- function(amp2.mV, m = abs_err_model) {
+  predict(m, newdata = tibble(amp2.mV = amp2.mV))
+}
+
+# plot
+internal_standard %>%
+  ggplot() +
+  aes(amp2.mV/1000, abs_err) + 
+  # fit line
+  geom_line(
+    data = function(df) {
+      tibble(
+        amp2.mV = seq(min(df$amp2.mV), max(df$amp2.mV), length.out = 100),
+        abs_err = calculate_abs_error(amp2.mV)
+      ) %>% filter(!is.na(abs_err))
+    },
+    color = "red", size = 1
+  ) +
+  geom_point(size = 3) +
+  theme_figure(grid = TRUE) + 
+  # scales
+  scale_y_continuous(breaks = c(0, 5, 10, 20, 50, 100)) + 
+  scale_x_continuous(breaks = c(0, 1, 2, 5, 10, 15, 20), expand = c(0, 0.5)) +
+  #scale_x_log10() + # log scale instead
+  labs(
+    x = "mass 2 amplitude [V]",
+    y = TeX("internal standard ($nC_{36}$) absolute error [\U2030]")
+  )
+```
+
+# Figure S3: all isotope data
+
+## A: data plot
+
+```{r "S3A", fig.width=8, fig.height=8, warning=FALSE}
+# data plot
+p_s3a <- 
+  samples %>%
+  ggplot() +
+  aes(amp2.mV/1000, corrected_d2H.permil, fill = bp_short, shape = bp_short) + 
+  # errrors
+  geom_errorbar(
+    width = 0,
+    map = aes(ymin = corrected_d2H.permil - corrected_d2H_error.permil, 
+              ymax = corrected_d2H.permil + corrected_d2H_error.permil)
+  ) +
+  # data
+  geom_point(size = 3) +
+  # scales
+  scale_x_log10() +
+  scale_fill_manual(values = bp_colors) +
+  scale_color_manual(values = bp_colors) +
+  scale_shape_manual(values = bp_shapes) +
+  # wrap
+  facet_grid(growth~., labeller = latex_labeller, scale = "free_y") + 
+  # themes
+  theme_figure() +
+  theme(legend.position = "bottom", legend.direction = "horizontal") +
+  labs(
+    x = "mass 2 amplitude [V]",
+    y = TeX("corrected $\\delta^2H\\,\\[\U2030\\]$"),
+    shape = NULL, fill = NULL
+  ) 
+
+p_s3a
+```
+
+## B: density plot
+
+```{r "S3B", fig.width=6, fig.height=4, warning = FALSE}
+# density plot
+p_s3b <- 
+  samples %>%
+  ggplot() +
+  aes(y = corrected_d2H.permil, color = compound) +
+  # data
+  geom_density(
+    map = aes(x = after_stat(ndensity)),
+    alpha = 0.2,
+    position = "stack",
+    show.legend = FALSE
+  ) +
+  # include error bars to scale the same way as the main data
+  geom_errorbar(
+    map = aes(
+      ymin = corrected_d2H.permil - corrected_d2H_error.permil,
+      ymax = corrected_d2H.permil + corrected_d2H_error.permil,
+      x = 0),
+    width = 0, size = 0
+  ) +
+  # base line
+  geom_vline(xintercept = 0) +
+  # weighted averages (1/err^2 weighted)
+  geom_hline(
+    data = function(df) {
+      df %>% 
+        group_by(organism, growth, compound) %>%
+        summarize(
+          mean = Hmisc::wtd.mean(corrected_d2H.permil, 1/corrected_d2H_error.permil^2),
+          .groups = "drop"
+        )
+    },
+    map = aes(yintercept = mean, color = compound), size = 2
+  ) +
+  # facet
+  facet_grid(growth~compound, scales = "free_y") +
+  # scales
+  scale_x_continuous(exp = c(0, 0)) +
+  scale_color_manual(values = bp_colors) +
+  # theme
+  theme_figure(grid = FALSE) +
+  theme(
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(color = "white"),
+    panel.border = element_blank(),
+    plot.margin = margin(l = -3)
+  )+
+  labs(
+    y = TeX("corrected $\\delta^2H\\,\\[\U2030\\]$"),
+    x = "probability density"
+  )
+
+p_s3b
+```
+
+## A & B combined
+
+```{r "S3", fig.width=10, fig.height=6, warning = FALSE}
+# assemble plot
+plot_grid(
+  p_s3a + theme(plot.margin = margin(r = 0)), 
+  p_s3b + theme(legend.position = "none"),
+  align = "h", nrow = 1,
+  axis = "tb", rel_widths = c(2, 1)
+)
+```
+
+
+# Figure S4: relative abundances
+
+```{r "S4", fig.width=6, fig.height=5}
+samples_sum %>%
+  ggplot() +
+  aes(growth, rel_abundance_mean, fill = bp_short) +
+  geom_bar(stat = "identity", position = "stack", width = 0.9) +
+  # scales
+  scale_y_continuous(expand = c(0, 0), labels = function(x) paste0(100*x, "%")) +
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_fill_manual(values = bp_colors) +
+  # theme
+  theme_figure(grid = FALSE) +
+  theme(plot.margin = margin(t = 0.1, unit = "npc")) + 
+  labs(
+    x = "growth rate",
+    y = "relative abundance",
+    shape = NULL, fill = NULL, color = NULL
+  )
+```
+

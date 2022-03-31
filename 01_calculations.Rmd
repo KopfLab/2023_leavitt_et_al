@@ -1,0 +1,352 @@
+---
+title: "Calculations"
+date: "Last knitted on `r format(Sys.Date(), '%d %b %Y')`"
+author: "Sebastian Kopf, William Leavitt, Ann Pearson, Yuki Weber"
+output:
+  html_document: 
+    df_print: paged
+    number_sections: yes
+    toc: yes
+    toc_float: true
+    toc_depth: 3
+    code_folding: show
+editor_options:
+  chunk_output_type: console # switch to 'inline' if preferred
+---
+
+# Setup
+
+```{r "setup", message = FALSE}
+# packages
+library(rlang)
+library(tidyverse) # general data wrangling and plotting
+
+# custom funtions
+source("scripts/error_propagation.R")
+source("scripts/table_functions.R")
+
+# global knitting options for code rendering
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+# Load Data
+
+Applied calibration:
+
+$$
+\delta^{2} \text{H}_\text{raw} = \beta_{0} + \beta_{1} \cdot{} \delta^{2} \text{H}_\text{cal} + \beta_{2} \cdot{} A + \beta_{3} \cdot{} \delta^{2} \text{H}_\text{cal} \cdot{} \sqrt{A}
+$$
+
+```{r}
+# load data
+compounds <- readxl::read_excel("data/compounds.xlsx")
+organisms <- readxl::read_excel("data/organisms.xlsx")
+metadata <- readxl::read_excel("data/metadata.xlsx")
+samples <- readxl::read_excel("data/samples.xlsx") 
+internal_standard <- readxl::read_excel("data/internal_standard.xlsx") %>%
+  mutate(abs_err = abs(calibrated_d2H.permil - true_d2H.permil)) %>%
+  arrange(amp2.mV)
+# load and save chromatogram in cache
+chromatograms <- 
+  readxl::read_excel(
+    "data/chromatograms.xlsx", 
+    col_types = rep(c("numeric", "text", "numeric", "text"), times = c(2, 1, 3, 1))
+  )
+write_rds(chromatograms, "cache/chromatograms.rds")
+```
+
+# Calculations
+
+## Relative abundances
+
+```{r}
+# calculate relative abundances for all analyses where all 4 peaks are detected
+samples_w_rel_abundances <- 
+  samples %>%
+  # calculate relative abundances
+  group_by(analysis) %>%
+  mutate(
+    all_phytanes = n() == 4,
+    rel_abundance = ifelse(all_phytanes, area_all.Vs / sum(area_all.Vs), NA_real_)
+  ) %>%
+  ungroup() %>%
+  relocate(all_phytanes, rel_abundance, .before = raw_d2H.permil)
+```
+
+
+## Sample error estimates
+
+```{r}
+# create estimator for absolute error based on the internal standard
+abs_err_model <- loess(
+  formula = abs_err ~ amp2.mV,
+  data = internal_standard,
+  span = 0.75
+)
+# calculate error estimates
+samples_w_analytical_error <- samples_w_rel_abundances %>%
+  mutate(
+    calibrated_d2H_error.permil = predict(abs_err_model, newdata = tibble(amp2.mV = amp2.mV))
+  )
+```
+
+## Hydrogenation correction
+
+$$
+\delta^{2} \text{H}_\text{cor} = 
+  \left(1 + \frac{2}{n_H}\right) \cdot \delta^{2} \text{H}_\text{cal} - 
+  \frac{2}{n_H} \cdot \left( (\epsilon^2_\text{hydro} + 1) \cdot (\delta^{2} \text{H}_\text{H2} + 1) - 1 \right)
+$$
+
+$$
+\sigma_\text{cor} = \sqrt{
+  \left(\frac{\partial (\delta^{2} \text{H}_\text{cor})}{\partial  (\delta^{2} \text{H}_\text{cal})} \sigma_\text{cal} \right)^2 + 
+  \left(\frac{\partial (\delta^{2} \text{H}_\text{cor})}{\partial  (\delta^{2} \text{H}_\text{H2})} \sigma_\text{H2} \right)^2 +
+  \left(\frac{\partial (\delta^{2} \text{H}_\text{cor})}{\partial  (\epsilon^2_\text{hydro})} \sigma_\text{hydro} \right)^2
+}
+$$
+
+```{r}
+# parameters for hydrogenation correction (details in MS)
+d2H_H2.permil <- -64 # tank composition
+d2H_H2_sd.permil <- 2 # tank composition error
+eps_PtO2.permil = -721 # hydrogenation fractionation
+eps_PtO2_sd.permil = 152 # hydrogenation fractionation error
+
+# hydrogenation hydrogens
+fractionate <- rlang::expr(
+  ((d2H_H2.permil/1000 + 1) * (eps_PtO2.permil/1000 + 1) - 1) * 1000
+)
+hydro_d2H.permil <- eval(fractionate)
+hydro_d2H_sd.permil <- propagate_error(!!fractionate, dd2H_H2.permil = d2H_H2_sd.permil, deps_PtO2.permil = eps_PtO2_sd.permil)
+
+# chain lengths of biphytanes
+correct_for_H2 <- rlang::expr(
+  ((nH + 2) * calibrated_d2H.permil - 2 * hydro_d2H.permil) / nH
+)
+
+# calculate corrected d2H
+samples_w_hydrogen_correction <- samples_w_analytical_error %>%
+  mutate(
+    nH = 80 - 2 * parse_number(compound),
+    corrected_d2H.permil = !!correct_for_H2,
+    corrected_d2H_error.permil = propagate_error(
+      !!correct_for_H2, dnH = 0, 
+      dcalibrated_d2H.permil = calibrated_d2H_error.permil,
+      dhydro_d2H.permil = hydro_d2H_sd.permil
+    )
+  )
+
+# added uncertainty:
+message("Info: values changed by min ", 
+        samples_w_hydrogen_correction %>% 
+          with(min(corrected_d2H.permil - calibrated_d2H.permil)) %>%
+          round(1), "permil")
+message("Info: values changed by max ", 
+        samples_w_hydrogen_correction %>% 
+          with(max(corrected_d2H.permil - calibrated_d2H.permil)) %>%
+          round(1), "permil")
+message("Info: uncertainty increased by max ", 
+        samples_w_hydrogen_correction %>% 
+          with(max(corrected_d2H_error.permil - calibrated_d2H_error.permil)) %>%
+          round(1), "permil")
+```
+
+## Water-lipid fractionation
+
+$$
+^{2}\epsilon_\text{L/W} = \frac{\delta^{2} \text{H}_\text{cor} + 1}{\delta^{2} \text{H}_\text{water} + 1} - 1
+$$
+
+```{r}
+# calculate frationation
+fractionate <- rlang::expr(
+  ((corrected_d2H.permil/1000 + 1) / (d2H_water.permil/1000 + 1) - 1) * 1000
+)
+samples_w_epsilons <- samples_w_hydrogen_correction %>%
+  left_join(select(metadata, organism, growth, d2H_water.permil), by = c("organism", "growth")) %>%
+  mutate(
+    eps_2H_lipid_water.permil = !!fractionate,
+    eps_2H_lipid_water_error.permil = propagate_error(
+      !!fractionate, 
+      dcorrected_d2H.permil = corrected_d2H_error.permil,
+      dd2H_water.permil = 0.2
+    )
+  ) %>%
+  select(-d2H_water.permil) # for merging of metadata in other Rmds
+
+# save in cache
+write_rds(samples_w_epsilons, "cache/samples_w_epsilons.rds")
+```
+
+# Data Summaries
+
+## Individual biphytanes
+
+```{r}
+# calculate averages of analytical replicates
+samples_sum <- samples_w_epsilons %>%
+  # calculate number of analyses
+  group_by(organism, growth) %>%
+  mutate(n_analyses = length(unique(analysis))) %>%
+  ungroup() %>%
+  # calculate weights
+  group_by(organism, compound, growth) %>%
+  mutate(
+    d2H_norm_weights = 1/corrected_d2H_error.permil^2 / sum(1/corrected_d2H_error.permil^2),
+    eps_norm_weights = 1/eps_2H_lipid_water_error.permil^2 / sum(1/eps_2H_lipid_water_error.permil^2),
+  ) %>%
+  # summarize
+  summarize(
+    n_analyses = max(n_analyses),
+    # calculate d2H weighted mean
+    d2H_weighted_mean.permil = sum(d2H_norm_weights * corrected_d2H.permil),
+    # calculate d2H weighted standard deviation
+    d2H_weighted_stdev.permil = 
+      sqrt(Hmisc::wtd.var(corrected_d2H.permil, 1/corrected_d2H_error.permil^2, normwt = TRUE)),
+    # calculate d2H error by standard error propagation
+    d2H_propagated_error.permil =
+      sqrt(
+        sum(
+          propagate_error(
+            eq = d2H_norm_weights * corrected_d2H.permil,
+            dd2H_norm_weights = 0,
+            dcorrected_d2H.permil = corrected_d2H_error.permil,
+            quiet = TRUE
+          )^2
+        )
+      ),
+    # use whichever is larger (d2H_weighted_stdev or d2H_propagated_error)
+    d2H_error.permil = ifelse(
+      d2H_propagated_error.permil > d2H_weighted_stdev.permil, 
+      d2H_propagated_error.permil, d2H_weighted_stdev.permil),
+    # calculate eps weighted mean
+    eps_weighted_mean.permil = sum(eps_norm_weights * eps_2H_lipid_water.permil),
+    # calculate eps weighted standard deviation
+    eps_weighted_stdev.permil = 
+      sqrt(Hmisc::wtd.var(eps_2H_lipid_water.permil, 1/eps_2H_lipid_water_error.permil^2, normwt = TRUE)),
+    # calculate eps error by standard error propagation
+    eps_propagated_error.permil =
+      sqrt(
+        sum(
+          propagate_error(
+            eq = eps_norm_weights * eps_2H_lipid_water.permil,
+            deps_norm_weights = 0,
+            deps_2H_lipid_water.permil = eps_2H_lipid_water_error.permil,
+            quiet = TRUE
+          )^2
+        )
+      ),
+    # use whichever is larger (eps_weighted_stdev or eps_propagated_error)
+    eps_error.permil = ifelse(
+      eps_propagated_error.permil > eps_weighted_stdev.permil, 
+      eps_propagated_error.permil, eps_weighted_stdev.permil),
+    # calculate relative abundance mean and error
+    rel_abundance_mean = mean(rel_abundance, na.rm = TRUE),
+    rel_abundance_error = sd(rel_abundance, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # clenaup
+  select(-ends_with("norm_weights")) %>%
+  select(-ends_with("weighted_stdev.permil"), -ends_with("propagated_error.permil")) %>%
+  # normalize rel abundance
+  group_by(organism, growth) %>%
+  mutate(rel_abundance_mean = rel_abundance_mean/sum(rel_abundance_mean)) %>%
+  ungroup()
+
+# save in cache
+write_rds(samples_sum, "cache/samples_sum.rds")
+```
+
+## Ring enrichments
+
+```{r}
+# calculate ring difference (for each sample and biphytanes the average difference to all other biphytanes with fewer rings)
+ring_enrichments <- samples_sum %>%
+  select(organism, compound, growth, eps_weighted_mean.permil) %>%
+  { full_join(., ., by = c("organism", "growth"))  } %>%
+  filter(parse_number(compound.y) > parse_number(compound.x)) %>%
+  mutate(
+    label = sprintf("BP-%.0f vs. %.0f", parse_number(compound.y), parse_number(compound.x)),
+    D_eps_per_ring = (eps_weighted_mean.permil.y - eps_weighted_mean.permil.x)/(parse_number(compound.y) - parse_number(compound.x))
+  ) %>%
+  select(organism, growth, compound = compound.y, label, D_eps_per_ring) %>%
+  # summarize for each compound
+  group_by(organism, growth, compound) %>%
+  summarize(D_eps_per_ring = mean(D_eps_per_ring)) %>%
+  ungroup()
+
+# save in cache
+write_rds(ring_enrichments, "cache/ring_enrichments.rds")
+```
+
+## Growth regression
+
+```{r}
+growth_regs <- 
+  samples_sum %>%
+  left_join(metadata, by = c("organism", "growth")) %>%
+  nest(data = -organism) %>%
+  mutate(
+    fit = map(data, ~lm(eps_weighted_mean.permil ~ TD.hours, weights = rel_abundance_mean, data = .x)),
+    estimates = map(fit, broom::tidy),
+    summary = map(fit, broom::glance)
+  ) %>%
+  unnest(estimates) %>% 
+  rename(term_stat = statistic, term_pval = p.value) %>% 
+  filter(term == "TD.hours") %>%
+  unnest(summary)
+
+# save in cache
+write_rds(growth_regs, "cache/growth_regs.rds")
+
+# slopes and uncertainty
+message("Growth regression: ")
+growth_regs %>%
+  mutate(
+    permil_per_hour = round(estimate, 1), permil_per_hour_err = round(std.error, 1), 
+    permil_per_day = round(estimate * 24, 1), permil_per_day_err = round(std.error * 24, 1),
+    r2 = round(adj.r.squared, 2), pval = signif(p.value, 3)
+  ) %>%
+  select(organism, starts_with("permil_per"), r2, pval)
+```
+
+
+## Abundance weighted biphytanes
+
+```{r}
+samples_ab_weighted_sum <- 
+  samples_sum %>% 
+  group_by(organism, growth) %>%
+  summarize(
+    d2H_ab_weighted_mean.permil = sum(d2H_weighted_mean.permil * rel_abundance_mean),
+    d2H_ab_weighted_mean_error.permil = 
+      sqrt(
+        sum(
+          propagate_error(
+            eq = d2H_weighted_mean.permil * rel_abundance_mean,
+            dd2H_weighted_mean.permil = d2H_error.permil,
+            drel_abundance_mean = rel_abundance_error,
+            quiet = TRUE
+          )^2
+        )
+      ),
+    eps_ab_weighted_mean.permil = sum(eps_weighted_mean.permil * rel_abundance_mean),
+    eps_ab_weighted_mean_error.permil = 
+      sqrt(
+        sum(
+          propagate_error(
+            eq = eps_weighted_mean.permil * rel_abundance_mean,
+            deps_weighted_mean.permil = eps_error.permil,
+            drel_abundance_mean = rel_abundance_error,
+            quiet = TRUE
+          )^2
+        )
+      ),
+    .groups = "drop"
+  )
+
+# save in cache
+write_rds(samples_ab_weighted_sum, "cache/samples_ab_weighted_sum.rds")
+```
+
