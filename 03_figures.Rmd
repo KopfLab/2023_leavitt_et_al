@@ -144,7 +144,7 @@ plot_grid(
 
 # Figure 2: data overview plot
 
-```{r "2", fig.width=8, fig.height=6, warning = FALSE, eval = TRUE}
+```{r "2", fig.width=6, fig.height=6, warning = FALSE, eval = TRUE}
 # plot data frame with shift ranges
 plot_df <- 
   samples_sum %>%
@@ -212,7 +212,7 @@ p_2 <-
         )
     },
     mapping = aes(x = 70, y = -270, label = label),
-    parse = TRUE, hjust = 0.5, size = 5
+    parse = TRUE, hjust = 0.5, size = 4
   ) + 
   # error bars
   geom_errorbar(
@@ -225,20 +225,21 @@ p_2 <-
   ) +
   # scales
   scale_x_continuous(breaks = 0:5*20) + 
-  scale_y_continuous(breaks = -10 * 10:30) +
+  scale_y_continuous(breaks = -15 * 10:40 + 5) +
   scale_fill_manual(values = bp_colors) +
   scale_color_manual(values = bp_colors) +
   scale_shape_manual(values = bp_shapes) +
+  expand_limits(y = -295, x = c(20, 100)) +
   # theme
   theme_figure(grid = FALSE) + 
   theme(
     legend.position = "bottom",
     legend.title = element_blank(),
-    plot.margin = margin(r = 0.1, unit = "npc")
+    aspect.ratio = 1
   ) +
   labs(
     x = TeX("$T_D\\,\\[hours\\]$"),
-    y = TeX("$^2\\epsilon_{L/W}\\,\\[\U2030\\]$"),
+    y = TeX("$\\epsilon_{L/W}\\,\\[\U2030\\]$"),
     shape = "biphytane", fill = "biphytane", color = "biphytane"
   ) + 
   # make the legend symbols larger
@@ -257,16 +258,16 @@ p_2 <-
 p_2
 ```
 
-# Figure 7: data with model fits
+# Figure 6: data with model fits
 
 Data points seized by the relative abundance of the different biphytanes. See Figure S5 for details visualization of the relative abundances.
 
-```{r "8", fig.width=6.5, fig.height=5, warning = FALSE}
+```{r "6", fig.width=6, fig.height=6, warning = FALSE}
 # simple model for ring enrichment
 eps_model <-
   tribble(
     ~organism, ~gr_effect.permil_p_hr, ~ring_effect.permil, ~bp0_intercept.permil,
-    "Nmar",    0.1,                    5.6,                 -280,
+    "Nmar",    0.15,                    6.7,                 -284,
   )
 samples_sum_w_model <- 
   samples_sum %>%
@@ -317,24 +318,27 @@ p_7 <-
   scale_fill_manual(values = bp_colors) +
   scale_color_manual(values = bp_colors) +
   scale_shape_manual(values = bp_shapes) +
-  scale_y_continuous(breaks = -10 * 10:40) +
+  scale_y_continuous(breaks = -15 * 10:40 + 5) +
   scale_x_continuous(breaks = 0:6*20) +
+  expand_limits(y = -295, x = c(20, 100)) +
   # theme
   theme_figure(grid = FALSE) + 
   theme(
     legend.position = "bottom",
-    legend.title = element_blank()
+    legend.title = element_blank(),
+    aspect.ratio = 1
   ) +
   labs(
-    x = TeX("$T_D\\,\\[hours\\]$"),
-    y = TeX("$^2\\epsilon_{L/W}\\,\\[\U2030\\]$"),
+    x = TeX("$T_D\\,\\[hr\\]$"),
+    y = TeX("$\\epsilon_{L/W}\\,\\[\U2030\\]$"),
     shape = "biphytane", fill = "biphytane", color = "biphytane"
   ) + 
   # make the legend symbols larger
   guides(
     size = guide_legend(override.aes = list(shape = 21)), 
     shape = guide_legend(override.aes = list(size = 4))
-  )
+  ) + 
+  theme()
 
 p_7
 ```
