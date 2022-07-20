@@ -35,7 +35,7 @@ source("scripts/plotting_functions.R")
 knitr::opts_chunk$set(
   eval = TRUE, echo = FALSE,
   collapse = TRUE, comment = "#>",
-  dev = c("png", "pdf"),
+  dev = c("png", "pdf", "postscript"),
   dev.args = list(pdf = list(encoding = "WinAnsi", useDingbats = FALSE)),
   fig.keep = "all",
   fig.path = file.path("plots", "figure_")
@@ -73,7 +73,7 @@ bp_shapes <- c(23, 21, 22, 24)
 
 # Figure 1: chromatography & structures
 
-```{r "1", fig.width=9, fig.height=7, warning = FALSE, eval = FALSE}
+```{r "1", fig.width=9, fig.height=7, warning = FALSE, eval = TRUE}
 p_chroms <- chromatograms %>%
   # show only mass 2 trace across the paks rt widow
   filter(mass == "m2", time.s >= 1100, time.s <= 1300) %>%
@@ -110,7 +110,7 @@ p_chroms <- chromatograms %>%
   scale_y_continuous(expand = c(0, 0), breaks = 2*0:5) + expand_limits(y = c(0, 10)) +
   scale_x_continuous(
     breaks = c(19:21) * 60, expand = c(0, 0),
-    labels = function(x) sprintf("%.0f s / %.0f min", x, x/60)
+    labels = function(x) sprintf("%.0f s\n%.0f min", x, x/60)
   ) +
   scale_fill_manual(values = c(bp_colors, tail(bp_colors, 1))) +
   scale_color_manual(values = c(bp_colors, tail(bp_colors, 1))) +
@@ -239,7 +239,7 @@ p_2 <-
   ) +
   labs(
     x = TeX("$T_D\\,\\[hours\\]$"),
-    y = TeX("$\\epsilon_{L/W}\\,\\[\U2030\\]$"),
+    y = TeX("$^2\\epsilon_{L/W}\\,\\[\U2030\\]$"),
     shape = "biphytane", fill = "biphytane", color = "biphytane"
   ) + 
   # make the legend symbols larger
@@ -262,40 +262,33 @@ p_2
 
 Data points seized by the relative abundance of the different biphytanes. See Figure S5 for details visualization of the relative abundances.
 
+
 ```{r "6", fig.width=6, fig.height=6, warning = FALSE}
 # simple model for ring enrichment
 eps_model <-
   tribble(
-    ~organism, ~gr_effect.permil_p_hr, ~ring_effect.permil, ~bp0_intercept.permil,
-    "Nmar",    0.15,                    6.7,                 -284,
+    ~bp_short, ~intercept, ~slope,
+    "BP-0",    -285.9,     0.142,
+    "BP-1",    -279.9,     0.144,
+    "BP-2",    -273.1,     0.146,
+    "BP-3",    -266.1,     0.149
   )
-samples_sum_w_model <- 
-  samples_sum %>%
-  left_join(eps_model, by = "organism")
 
-generate_model_fits <- function(df) {
-  df %>% 
-    mutate(
-      eps_weighted_mean.permil = 
-        bp0_intercept.permil - parse_number(bp_short) * ring_effect.permil +
-        gr_effect.permil_p_hr * TD.hours
-    )
-}
+eps_model_fits <- 
+  tribble(
+    ~growth, ~`BP-0`, ~`BP-1`, ~`BP-2`, ~`BP-3`,
+    "fast",  -281.5,  -275.2,  -268.5,  -261.5,
+    "medium",-279.4,  -273.0,  -266.3,  -259.3,
+    "slow",  -272.8,  -266.3,  -259.5,  -252.4
+  )
+
+circle_radius <- 3
 
 # plot
 p_7 <- 
-  samples_sum_w_model %>%
+  samples_sum %>%
   ggplot() +
   aes(x = TD.hours, y = eps_weighted_mean.permil, shape = bp_short, color = bp_short, fill = bp_short) +
-  # model fit points
-  geom_point(
-    data = generate_model_fits,
-    size = 7, shape = 16, show.legend = FALSE, fill = NA
-  ) +
-  geom_point(
-    data = generate_model_fits,
-    size = 5.5, shape = 16, color = "white", show.legend = FALSE, 
-  ) +
   # error bars
   geom_errorbar(
     map = aes(ymin = eps_weighted_mean.permil -  eps_error.permil, 
@@ -304,16 +297,32 @@ p_7 <-
   ) +
   # model fits
   geom_abline(
-    data = function(df) {
-      df %>% select(bp_short, gr_effect.permil_p_hr, ring_effect.permil, bp0_intercept.permil) %>%
-        unique() %>%
-        mutate(intercept = bp0_intercept.permil - parse_number(bp_short) * ring_effect.permil)
-    },
-    map = aes(intercept = intercept, slope = gr_effect.permil_p_hr, color = bp_short),
+    data = . %>% select(bp_short) %>% unique() %>%
+        left_join(eps_model, by = "bp_short"),
+    map = aes(intercept = intercept, slope = slope, color = bp_short),
     linetype = 3, size = 1, show.legend = FALSE
   ) +
   # data points
   geom_point(size = 5, color = "black") +
+  # model fits circles
+  geom_path(
+    data = . %>% select(bp_short, growth, TD.hours) %>% unique() %>%
+      mutate(id = row_number()) %>%
+      left_join(
+        eps_model_fits %>% 
+          pivot_longer(cols = starts_with("BP"),
+                       names_to = "bp_short",
+                       values_to = "eps_weighted_mean.permil"),
+        by = c("bp_short", "growth")
+      ) %>%
+      crossing(t = seq(0, 2 * pi, length.out = 100)) %>%
+      mutate(
+          eps_weighted_mean.permil = eps_weighted_mean.permil +
+            circle_radius * 63/80 * sin(t),
+          TD.hours = TD.hours + circle_radius * cos(t)
+      ),
+    map = aes(group = id), size = 1, show.legend = FALSE
+  ) +
   # scales
   scale_fill_manual(values = bp_colors) +
   scale_color_manual(values = bp_colors) +
@@ -330,22 +339,21 @@ p_7 <-
   ) +
   labs(
     x = TeX("$T_D\\,\\[hr\\]$"),
-    y = TeX("$\\epsilon_{L/W}\\,\\[\U2030\\]$"),
+    y = TeX("$^2\\epsilon_{L/W}\\,\\[\U2030\\]$"),
     shape = "biphytane", fill = "biphytane", color = "biphytane"
-  ) + 
+  ) +
   # make the legend symbols larger
   guides(
     size = guide_legend(override.aes = list(shape = 21)), 
     shape = guide_legend(override.aes = list(size = 4))
-  ) + 
-  theme()
+  ) 
 
 p_7
 ```
 
 # Figure S1: calibration model summary
 
-```{r "S1", fig.width = 8, fig.height = 7, warning=FALSE}
+```{r "S2", fig.width = 8, fig.height = 7, warning=FALSE}
 # load data unique to this plot
 calibration_standards <- readxl::read_excel("data/calibration_standards.xlsx")
 
@@ -405,7 +413,7 @@ calibration_standards %>%
 # Figure S2: absolute error estimates
 
 
-```{r "S2", fig.width = 8, fig.height = 6, warning=FALSE}
+```{r "S3", fig.width = 8, fig.height = 6, warning=FALSE}
 # create estimator for absolute error based on the internal standard
 abs_err_model <- loess(
   formula = abs_err ~ amp2.mV,
@@ -543,21 +551,24 @@ p_s3b
 
 ## A & B combined
 
-```{r "S3", fig.width=10, fig.height=6, warning = FALSE}
+```{r "Sx_all_data", fig.width=10, fig.height=6, warning = FALSE}
 # assemble plot
-plot_grid(
-  p_s3a + theme(plot.margin = margin(r = 0)), 
-  p_s3b + theme(legend.position = "none"),
-  align = "h", nrow = 1,
-  axis = "tb", rel_widths = c(2, 1)
-)
+p_all_data <-
+  plot_grid(
+    p_s3a + theme(plot.margin = margin(r = 0)), 
+    p_s3b + theme(legend.position = "none"),
+    align = "h", nrow = 1,
+    axis = "tb", rel_widths = c(2, 1)
+  )
+p_all_data
 ```
 
 
 # Figure S4: relative abundances
 
 ```{r "S4", fig.width=6, fig.height=5}
-samples_sum %>%
+p_relab <- 
+  samples_sum %>%
   ggplot() +
   aes(growth, rel_abundance_mean, fill = bp_short) +
   geom_bar(stat = "identity", position = "stack", width = 0.9) +
@@ -573,5 +584,39 @@ samples_sum %>%
     y = "relative abundance",
     shape = NULL, fill = NULL, color = NULL
   )
+p_relab
+```
+
+# FINAL!!!
+
+# Figure 1: data sum plus structures
+
+```{r "1_w_structures", fig.width=6, fig.height=9, warning = FALSE, eval = TRUE}
+# combine data overview with structures
+plot_grid(
+  p_2,
+  ggdraw() + draw_image("figures/biphytanes.pdf"),
+  ncol = 1, rel_heights = c(2, 0.8),
+  labels = c("A", "B")
+)
+```
+
+
+# Figure S3: all data + structures + rel abundances
+
+```{r "S1_all", fig.width=10, fig.height=12, warning=FALSE}
+# combine all data with chroms and rel. abundances
+plot_grid(
+  p_all_data,
+  plot_grid(
+    p_chroms + theme(legend.position = "none"),
+    p_relab + theme(legend.position = "none", plot.margin = margin(0, 0, 0, 0.05, "npc")),
+    nrow = 1, rel_widths = c(1, 1), align = "h", axis = "tb",
+    labels = c("B", "C")
+  ),
+  ncol = 1, rel_heights = c(3, 2),
+  labels = c("A", "")
+)
+
 ```
 
