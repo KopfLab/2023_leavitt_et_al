@@ -1,7 +1,7 @@
 ---
 title: "Calculations"
 date: "Last knitted on `r format(Sys.Date(), '%d %b %Y')`"
-author: "Sebastian Kopf, William Leavitt, Ann Pearson, Yuki Weber"
+author: "Leavitt, Kopf, Weber, Pearson"
 output:
   html_document: 
     df_print: paged

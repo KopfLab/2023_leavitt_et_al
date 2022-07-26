@@ -38,7 +38,7 @@ knitr::opts_chunk$set(
   dev = c("png", "pdf", "postscript"),
   dev.args = list(pdf = list(encoding = "WinAnsi", useDingbats = FALSE)),
   fig.keep = "all",
-  fig.path = file.path("plots", "figure_")
+  fig.path = file.path("plots", "")
 )
 ```
 
@@ -46,7 +46,7 @@ knitr::opts_chunk$set(
 
 # Load data
 
-```{r, eval = TRUE}
+```{r}
 # load data
 calibration_standards <- readxl::read_excel("data/calibration_standards.xlsx")
 internal_standard <- readxl::read_excel("data/internal_standard.xlsx") %>%
@@ -66,14 +66,16 @@ growth_regs <- readr::read_rds("cache/growth_regs.rds")
 
 # Plotting constants
 
-```{r, eval = TRUE}
+```{r}
 bp_colors <- c("#D55E00", "#009E73", "#56B4E9", "#E69F00")
 bp_shapes <- c(23, 21, 22, 24)
 ```
 
-# Figure 1: chromatography & structures
+# Plots
 
-```{r "1", fig.width=9, fig.height=7, warning = FALSE, eval = TRUE}
+## Chromatogram
+
+```{r "plot_chrom", fig.width=9, fig.height=5, warning = FALSE}
 p_chroms <- chromatograms %>%
   # show only mass 2 trace across the paks rt widow
   filter(mass == "m2", time.s >= 1100, time.s <= 1300) %>%
@@ -129,22 +131,13 @@ p_chroms <- chromatograms %>%
   # larger lgend entries
   guides(shape = guide_legend(override.aes = list(size = 4)))
 
-# combine chromatograms with structure drawings
-plot_grid(
-  p_chroms + theme(legend.position = "none"),
-  plot_grid(
-    get_legend(p_chroms),
-    ggdraw() + draw_image("figures/biphytanes.pdf"),
-    nrow = 1, rel_widths = c(1, 9)
-  ),
-  ncol = 1, rel_heights = c(2, 3)
-)
+p_chroms
 ```
 
 
-# Figure 2: data overview plot
+## Data overview
 
-```{r "2", fig.width=6, fig.height=6, warning = FALSE, eval = TRUE}
+```{r "plot_data_overview", fig.width=6, fig.height=6, warning = FALSE}
 # plot data frame with shift ranges
 plot_df <- 
   samples_sum %>%
@@ -156,7 +149,7 @@ plot_df <-
   ungroup()
 
 # plot
-p_2 <- 
+p_data <- 
   plot_df %>%
   ggplot() +
   # doubling time indicators (vertical dashed lines)
@@ -255,15 +248,12 @@ p_2 <-
     size = 5
   ) 
 
-p_2
+p_data
 ```
 
-# Figure 6: data with model fits
+## Data with model fits
 
-Data points seized by the relative abundance of the different biphytanes. See Figure S5 for details visualization of the relative abundances.
-
-
-```{r "6", fig.width=6, fig.height=6, warning = FALSE}
+```{r "plot_data_with_model", fig.width=6, fig.height=6, warning = FALSE}
 # simple model for ring enrichment
 eps_model <-
   tribble(
@@ -285,7 +275,7 @@ eps_model_fits <-
 circle_radius <- 3
 
 # plot
-p_7 <- 
+p_data_w_model <- 
   samples_sum %>%
   ggplot() +
   aes(x = TD.hours, y = eps_weighted_mean.permil, shape = bp_short, color = bp_short, fill = bp_short) +
@@ -348,12 +338,12 @@ p_7 <-
     shape = guide_legend(override.aes = list(size = 4))
   ) 
 
-p_7
+p_data_w_model
 ```
 
-# Figure S1: calibration model summary
+## Data calibration summary
 
-```{r "S2", fig.width = 8, fig.height = 7, warning=FALSE}
+```{r "plot_calib_summary", fig.width = 8, fig.height = 7, warning=FALSE}
 # load data unique to this plot
 calibration_standards <- readxl::read_excel("data/calibration_standards.xlsx")
 
@@ -369,7 +359,8 @@ rmse <- calibration_standards %>%
 rmse %>% knitr::kable()
 
 # plot
-calibration_standards %>%
+p_calibs <- 
+  calibration_standards %>%
   mutate(
     panel = as_factor(calibration) %>%
       fct_relevel("model.simple") %>%
@@ -408,12 +399,13 @@ calibration_standards %>%
     y = TeX("standard ($nC_{15-30}$) residuals in \U2030")
   )
 
+p_calibs
 ```
 
-# Figure S2: absolute error estimates
+## Absolute error estimates
 
 
-```{r "S3", fig.width = 8, fig.height = 6, warning=FALSE}
+```{r "plot_abs_errors", fig.width = 8, fig.height = 6, warning=FALSE}
 # create estimator for absolute error based on the internal standard
 abs_err_model <- loess(
   formula = abs_err ~ amp2.mV,
@@ -425,7 +417,8 @@ calculate_abs_error <- function(amp2.mV, m = abs_err_model) {
 }
 
 # plot
-internal_standard %>%
+p_errors <- 
+  internal_standard %>%
   ggplot() +
   aes(amp2.mV/1000, abs_err) + 
   # fit line
@@ -448,15 +441,17 @@ internal_standard %>%
     x = "mass 2 amplitude [V]",
     y = TeX("internal standard ($nC_{36}$) absolute error [\U2030]")
   )
+
+p_errors
 ```
 
-# Figure S3: all isotope data
+## All isotope data
 
-## A: data plot
+### A: data plot
 
-```{r "S3A", fig.width=8, fig.height=8, warning=FALSE}
+```{r "plot_all_data_points", fig.width=8, fig.height=8, warning=FALSE}
 # data plot
-p_s3a <- 
+p_all_data_points <- 
   samples %>%
   ggplot() +
   aes(amp2.mV/1000, corrected_d2H.permil, fill = bp_short, shape = bp_short) + 
@@ -484,14 +479,14 @@ p_s3a <-
     shape = NULL, fill = NULL
   ) 
 
-p_s3a
+p_all_data_points
 ```
 
-## B: density plot
+### B: density plot
 
-```{r "S3B", fig.width=6, fig.height=4, warning = FALSE}
+```{r "plot_all_data_density", fig.width=6, fig.height=4, warning = FALSE}
 # density plot
-p_s3b <- 
+p_all_data_density <- 
   samples %>%
   ggplot() +
   aes(y = corrected_d2H.permil, color = compound) +
@@ -546,17 +541,17 @@ p_s3b <-
     x = "probability density"
   )
 
-p_s3b
+p_all_data_density
 ```
 
-## A & B combined
+### A & B combined
 
-```{r "Sx_all_data", fig.width=10, fig.height=6, warning = FALSE}
+```{r "plot_all_data_combined", fig.width=10, fig.height=6, warning = FALSE}
 # assemble plot
 p_all_data <-
   plot_grid(
-    p_s3a + theme(plot.margin = margin(r = 0)), 
-    p_s3b + theme(legend.position = "none"),
+    p_all_data_points + theme(plot.margin = margin(r = 0)), 
+    p_all_data_density + theme(legend.position = "none"),
     align = "h", nrow = 1,
     axis = "tb", rel_widths = c(2, 1)
   )
@@ -564,9 +559,9 @@ p_all_data
 ```
 
 
-# Figure S4: relative abundances
+## Relative abundances
 
-```{r "S4", fig.width=6, fig.height=5}
+```{r "plot_rel_abundances", fig.width=6, fig.height=5}
 p_relab <- 
   samples_sum %>%
   ggplot() +
@@ -587,24 +582,29 @@ p_relab <-
 p_relab
 ```
 
-# FINAL!!!
+# Figures
 
-# Figure 1: data sum plus structures
+## Figure 1
 
-```{r "1_w_structures", fig.width=6, fig.height=9, warning = FALSE, eval = TRUE}
+```{r "figure_1", fig.width=6, fig.height=9, warning = FALSE}
 # combine data overview with structures
 plot_grid(
-  p_2,
+  p_data,
   ggdraw() + draw_image("figures/biphytanes.pdf"),
   ncol = 1, rel_heights = c(2, 0.8),
   labels = c("A", "B")
 )
 ```
 
+## Figure 6
 
-# Figure S3: all data + structures + rel abundances
+```{r "figure_6", fig.width=6, fig.height=6, warning = FALSE}
+p_data_w_model
+```
 
-```{r "S1_all", fig.width=10, fig.height=12, warning=FALSE}
+## Figure S1
+
+```{r "figure_S1", fig.width=10, fig.height=12, warning=FALSE}
 # combine all data with chroms and rel. abundances
 plot_grid(
   p_all_data,
@@ -618,5 +618,17 @@ plot_grid(
   labels = c("A", "")
 )
 
+```
+
+## Figure S2
+
+```{r "figure_S2", fig.width = 8, fig.height = 7, warning=FALSE}
+p_calibs
+```
+
+## Figure S3
+
+```{r "figure_S3", fig.width = 8, fig.height = 6, warning=FALSE}
+p_errors
 ```
 
