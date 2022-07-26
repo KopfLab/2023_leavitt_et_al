@@ -24,8 +24,6 @@ editor_options:
 library(tidyverse) # general data wrangling and plotting
 library(latex2exp) # typesetting of latex math
 library(cowplot) # plot arrangement
-library(egg) # plot arrangement
-library(magick) # combine figures
 
 # scripts
 source("scripts/table_functions.R")
