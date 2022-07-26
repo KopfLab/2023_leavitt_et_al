@@ -594,9 +594,9 @@ plot_grid(
 )
 ```
 
-## Figure 6
+## Figure 5
 
-```{r "figure_6", fig.width=6, fig.height=6, warning = FALSE}
+```{r "figure_5", fig.width=6, fig.height=6, warning = FALSE}
 p_data_w_model
 ```
 
