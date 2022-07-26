@@ -1,6 +1,6 @@
 ---
 title: "Figures"
-author: "Sebastian Kopf, William Leavitt, Ann Pearson, Yuki Weber"
+author: "Leavitt, Kopf, Weber, Pearson"
 date: "Last knitted on `r format(Sys.Date(), '%d %b %Y')`"
 output:
   html_document:
