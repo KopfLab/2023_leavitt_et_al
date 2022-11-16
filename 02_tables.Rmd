@@ -49,7 +49,7 @@ ring_enrichments <- readr::read_rds("cache/ring_enrichments.rds")
 
 ```{r}
 # save in data output
-table_s1 <- samples_sum  %>%
+table_1 <- samples_sum  %>%
   left_join(compounds, by = "compound") %>%
   left_join(metadata, by = c("organism", "growth")) %>%
   left_join(ring_enrichments, by = c("organism", "growth", "compound")) %>%
@@ -70,8 +70,8 @@ table_s1 <- samples_sum  %>%
          eps_ab_weighted_mean.permil, eps_ab_weighted_mean_error.permil
   )
 
-table_s1_formatted <-
-  table_s1 %>% 
+table_1_formatted <-
+  table_1 %>% 
   transmute(
     TD.hours = sprintf("%.1f", TD.hours),
     n_analyses = n_analyses,
@@ -94,7 +94,7 @@ table_s1_formatted <-
     eps_ab_weighted_mean = sprintf("%.0f \U00B1 %.0f", eps_ab_weighted_mean.permil, eps_ab_weighted_mean_error.permil)
   )
 
-export_to_excel(`numbers` = table_s1, `formatted` = table_s1_formatted, file = "output/table_1_data_summary.xlsx")
+export_to_excel(`numbers` = table_1, `formatted` = table_1_formatted, file = "output/table_1_data_summary.xlsx")
 ```
 
 ## Range and means
@@ -117,6 +117,75 @@ ring_enrichments %>%
     mean_ring_enrichment = mean(D_eps_per_ring) %>% round(1), 
     sd = sd(D_eps_per_ring) %>% round(1)
   )
+```
+
+# Table 3: Ring effects
+
+```{r}
+# table 3 (model calculation summary)
+table_3 <- readr::read_rds("cache/H_accounting.rds") %>%
+  mutate(
+    across(n_A_W:n_x, 
+           function(x) x/n_BP, 
+           .names = "f_{str_remove(.col, 'n_')}"
+    )
+  ) %>%
+  group_by(scenario) %>%
+  mutate(
+    Df_w_and_x = (f_W + f_x) - (f_W[bp_short == "BP-0"] + f_x[bp_short == "BP-0"]),
+    Df_NADPH = f_NADPH - f_NADPH[bp_short == "BP-0"],
+    Df_FMN = f_FMN - f_FMN[bp_short == "BP-0"]
+  ) %>%
+  ungroup() %>%
+  filter(n_rings > 0) %>%
+  select(scenario, bp_short, starts_with("Df"))
+
+# export table S3
+table_3_formatted <-
+  table_3 %>%
+  transmute(
+    scenario = scenario, 
+    bp = str_remove(bp_short, "-"),
+    across(
+      starts_with("Df"), 
+      function(x) sprintf("%+.2f%%", 100 * x), 
+      .names = "f_{str_remove(.col, 'n_')}"
+    )
+  ) 
+
+export_to_excel(`numbers` = table_3, `formatted` = table_3_formatted, file = "output/table_3_ring_changes.xlsx")
+```
+
+
+# Table S1: H accounting
+
+```{r}
+# load from model calculations
+H_accounting <- readr::read_rds("cache/H_accounting.rds") %>%
+  select(-check)
+
+# table S1
+table_s1 <- H_accounting %>%
+  mutate(
+    across(n_A_W:n_x, 
+           function(x) x/n_BP, 
+           .names = "f_{str_remove(.col, 'n_')}"
+    )
+  ) 
+
+# export table S1
+table_s1_formatted <-
+  H_accounting %>%
+  transmute(
+    scenario = scenario, 
+    bp = str_remove(bp_short, "-"),
+    across(n_A_W:n_x, 
+           function(x) sprintf("%s%%\n(%s)", round(100 * x/n_BP, 2), round(x, 2)), 
+           .names = "f_{str_remove(.col, 'n_')}"
+    )
+  ) 
+
+export_to_excel(`numbers` = table_s1, `formatted` = table_s1_formatted, file = "output/table_S1_H_accounting.xlsx")
 ```
 
 

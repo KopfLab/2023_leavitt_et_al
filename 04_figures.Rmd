@@ -58,8 +58,13 @@ samples <- readr::read_rds("cache/samples_w_epsilons.rds") %>%
 samples_sum <- readr::read_rds("cache/samples_sum.rds") %>%
   left_join(compounds, by = "compound") %>%
   left_join(metadata, by = c("organism", "growth"))
+samples_ab_weighted_sum <- readr::read_rds("cache/samples_ab_weighted_sum.rds")
 chromatograms <- readr::read_rds("cache/chromatograms.rds")
 growth_regs <- readr::read_rds("cache/growth_regs.rds")
+fits_wide <- readr::read_rds("cache/fits_wide.rds")
+fits_sum <- readr::read_rds("cache/fits_sum.rds")
+fits_alphas_sum <- readr::read_rds("cache/fits_alphas_sum.rds")
+NADPH_imbalances <- readr::read_rds("cache/NADPH_imbalances.rds")
 ```
 
 # Plotting constants
@@ -249,27 +254,228 @@ p_data <-
 p_data
 ```
 
+## Model fit parameters
+
+### Alphas
+
+```{r "plot_model_parameters_alphas", fig.width=6.5, fig.height=6, warning=FALSE}
+colors <- viridis::plasma(begin = 0.7, end = 0.0, n =3)
+
+p_model_alphas <-
+  fits_sum %>%
+  ggplot() +
+  aes(alpha_NADPH, alpha_FMN_NADPH, color = factor(alpha_W), shape = x_fct, linetype = x_fct) +
+  geom_smooth(map = aes(color = NULL), method = "loess", formula = y ~ x, color = "black", span = 2, se = FALSE) +
+  geom_errorbar(
+    map = aes(ymin = alpha_FMN_NADPH - alpha_FMN_NADPH_se, ymax = alpha_FMN_NADPH + alpha_FMN_NADPH_se),
+    width = 0, linetype = 1) +
+  geom_errorbarh(
+    map = aes(xmin = alpha_NADPH - alpha_NADPH_se, xmax = alpha_NADPH + alpha_NADPH_se),
+    height = 0, linetype = 1) +
+  geom_point(size = 4) +
+  scale_color_manual(values = colors) +
+  scale_x_continuous(sec.axis = sec_permil_axis()) +
+  scale_y_continuous(sec.axis = sec_permil_axis()) +
+  labs(
+    x = expression(alpha[ETC] %.% alpha[NADPH]),
+    y = expression(alpha[FMN] / alpha[NADPH]),
+    color = expression(alpha[W]),#expression(alpha[W] ~"&"~ alpha[ex]),
+    shape = expression("H"[2]*"O exch."), 
+    linetype = expression("H"[2]*"O exch.")
+  ) + 
+  theme_figure(grid = FALSE) +
+  theme(legend.position = c(0.82, 0.7)) +
+  coord_cartesian(ylim = c(0.1, 0.5))
+p_model_alphas
+```
+
+### Lambda
+
+```{r "plot_model_parameters_lambda_th", fig.width=6, fig.height=6, warning=FALSE}
+alpha_TH_lims <- c(0.222, 0.566)
+alpha_TH_mid <- 0.5 * sum(alpha_TH_lims)
+
+p_model_lambda_th <- fits_wide %>%
+  filter(alpha_W != 0.7) %>%
+  ggplot() +
+  aes(alpha_TH, lambda, color = factor(alpha_W), group = paste(alpha_W, x_fct), linetype = x_fct) +
+  geom_vline(xintercept = alpha_TH_lims, linetype = 2) +
+  geom_vline(xintercept = alpha_TH_mid, linetype = 1, size = 0.2) + 
+  geom_ribbon(map = aes(ymin = lambda - lambda_se, ymax = lambda + lambda_se, fill = factor(alpha_W)), alpha = 0.1, color = NA) + 
+  geom_line() + 
+  geom_rect(data = ~.[1,], ymin = -Inf, ymax = Inf, xmin = -Inf, xmax = alpha_TH_lims[1],
+    fill = "white", color = NA, alpha = 0.5) +
+  geom_rect(data = ~.[1,], ymin = -Inf, ymax = Inf, xmin = alpha_TH_lims[2], xmax = Inf, 
+            fill = "white", color = NA, alpha = 0.5) +
+  scale_y_log10() +
+  scale_x_continuous(breaks = 0:10 * 0.2, sec.axis = sec_permil_axis(breaks = 0:10 * 0.2)) +
+  scale_color_manual(values = colors[c(1,3)]) +
+  scale_fill_manual(values = colors[c(1,3)]) +
+  coord_cartesian(ylim = c(0.009, 1.1), xlim = c(0.075, 0.98), expand = FALSE) + 
+  labs(
+    x = expression(alpha[TH]), y = expression(lambda), 
+    color = expression(alpha[W]),#expression(alpha[W] ~"&"~ alpha[ex]),
+    fill = expression(alpha[W]),#expression(alpha[W] ~"&"~ alpha[ex]),
+    linetype = expression("H"[2]*"O exch.")
+  ) +
+  theme_figure(grid = FALSE) +
+  theme(
+    legend.position = c(0.85, 0.24),
+    legend.spacing = unit(0, "npc"),
+    legend.background = element_blank()
+  )
+p_model_lambda_th
+```
+
+## NADH and NADPH
+
+$$
+\begin{aligned}
+R_{NADH} &= 
+  \frac{\alpha_{ETC} \cdot R_W}{\alpha_{TH} + f_L \cdot (1 - \alpha_{TH})} \\
+R_{NADPH} &= \alpha_{TH} \cdot R_{NADH}
+\end{aligned}
+$$
+
+```{r "plot_model_NADH_NADPH", fig.width=8, fig.height=6, warning=FALSE}
+# specific example with alpha_TH_mid, alpha_W = 0.9, no water exchange
+fits_examples <- 
+  fits_wide %>% 
+  filter(alpha_TH == round(alpha_TH_mid, 2), alpha_W == 0.9) %>%
+  # assume alpha_NADPH = 0.9
+  mutate(alpha_ETC = alpha_NADPH/0.9)
+
+# plot data
+fits_examples %>%
+  # fractional consumption of NADH
+  crossing(fN = seq(0, 1, length.out = 100)) %>%
+  mutate(
+    fL = 1 - fN,
+    alpha_NADH_vs_W = alpha_ETC / (alpha_TH + fL * (1 - alpha_TH)),
+    alpha_NADPH_vs_W = alpha_TH * alpha_NADH_vs_W
+  ) %>%
+  # prep for plotting
+  pivot_longer(cols = c(alpha_NADH_vs_W, alpha_NADPH_vs_W)) %>%
+  mutate(
+    name = name %>% as_factor() %>%
+      fct_recode(
+        "$R_{NADH}$" = "alpha_NADH_vs_W",
+        "$R_{NADPH}$" = "alpha_NADPH_vs_W",
+      )
+  ) %>%
+  # plot
+  ggplot() +
+  aes(x = fN, y = value, color = name, linetype = x_fct) +
+   # range
+  annotate(
+    "rect",
+    xmin = 1 - max(filter(NADPH_imbalances, alpha_TH >= alpha_TH_lims[1], alpha_TH <= alpha_TH_lims[2])$fL), 
+    xmax = Inf, ymin = -Inf, ymax = Inf, 
+    fill = "gray", alpha = 0.2, color = NA
+  ) +
+  # data
+  geom_line() +
+  geom_hline(
+    data = . %>% select(x_fct, alpha_ETC) %>% unique() %>% mutate(name = "$\\alpha_{ETC}$"),
+    map = aes(yintercept = alpha_ETC, linetype = x_fct, color = name)
+  ) + 
+  # water
+  geom_hline(yintercept = 1, linetype = 1, size = 1) +
+  annotate("text", x = 0, y = 1, label = "H[2]*O", hjust = 1.2, vjust = -0.2, parse = TRUE, size = 7) +
+  # scales
+  #scale_x_reverse(
+  scale_x_continuous(
+    breaks = 0.2 * (0:10),
+    expand = c(0, 0)
+    #labels = function(x) sprintf("%s\n(%s %%)", x, -x * 100)
+  ) +
+  scale_y_continuous(
+    breaks = 0.2 * (1:20),
+    labels = function(x) sprintf("%+0.f", (x-1) * 1000)
+  ) +
+  coord_cartesian(ylim = c(0.2, 2)) +
+  scale_color_brewer(palette = "Set1", labels = latex_labeller) +
+  theme_figure(grid = FALSE) +
+  labs(
+    #x = "fractional consumption of NADH flux\n(NADPH imbalance flux in %)",
+    x = "fractional consumption of NADH flux",
+    y = TeX("$\\delta^2H\\,\\[\U2030\\]$"),
+    color = "values",
+    linetype = expression("H"[2]*"O exch.")
+  )
+
+```
+
+## NADPH imbalance
+
+```{r "plot_model_NADPH_imbalance", fig.width=8, fig.height=5, warning=FALSE}
+NADPH_imbalance_data <-
+  bind_rows(
+    NADPH_imbalances %>%
+      filter(alpha_TH >= alpha_TH_lims[1], alpha_TH <= alpha_TH_lims[2]) %>%
+      group_by(growth) %>%
+      summarize(
+        balance = mean(NADPH_imb[near(alpha_TH, round(alpha_TH_mid, 2))]),
+        balance_min = min(NADPH_imb),
+        balance_max = max(NADPH_imb)
+      ) %>%
+      left_join(samples_ab_weighted_sum, by = "growth") %>%
+      mutate(
+        eps = eps_ab_weighted_mean.permil,
+        eps_se = eps_ab_weighted_mean_error.permil,
+        source = "this study"
+      ),
+    readxl::read_excel("data/literature.xlsx", sheet = "Wijker et al. 2019") %>%
+      filter(type == "WT") %>%
+      mutate(
+        balance = balance_vs_GU,
+        balance_min = balance_vs_GU - balance_vs_GU_err,
+        balance_max = balance_vs_GU + balance_vs_GU_err,
+        # balance = balance_vs_e_flux,
+        # balance_min = balance_vs_e_flux - balance_vs_e_flux_err,
+        # balance_max = balance_vs_e_flux + balance_vs_e_flux_err,
+        source = "Wijker et al. 2019"
+      )
+  )
+
+NADPH_imbalance_data %>%
+  ggplot() +
+  aes(balance, eps, ymin = eps - eps_se, ymax = eps + eps_se, 
+      xmin = balance_min, xmax = balance_max, color = source) +
+  geom_smooth(
+    data = . %>% filter(source != "this study"),
+    method = "lm", formula = y ~ x, se = FALSE
+  ) +
+  geom_smooth(
+    map = aes(color = NULL), color = "black",
+    method = "lm", formula = y ~ x, se = FALSE
+  ) +
+  geom_errorbar(width = 0) + 
+  geom_errorbarh(height = 0) +
+  geom_point(size = 4) +
+  theme_figure(grid = FALSE) +
+  scale_color_manual(values = c("black", "gray60")) +
+  scale_x_continuous(labels = function(x) 100 * x) +
+  scale_y_continuous(breaks = 100 * c(-5:2)) +
+  labs(x = "Predicted NADPH imbalance flux (%)",
+       y = TeX("$^2\\epsilon_{L/W}\\,\\[\U2030\\]$")) +
+  coord_cartesian(ylim = c(-500, 200))
+```
+
+
 ## Data with model fits
 
 ```{r "plot_data_with_model", fig.width=6, fig.height=6, warning = FALSE}
-# simple model for ring enrichment
+# include the model values from the NLS fit
 eps_model <-
-  tribble(
-    ~bp_short, ~intercept, ~slope,
-    "BP-0",    -285.9,     0.142,
-    "BP-1",    -279.9,     0.144,
-    "BP-2",    -273.1,     0.146,
-    "BP-3",    -266.1,     0.149
+  fits_alphas_sum %>%
+  mutate(
+    eps_weighted_mean.permil = (m_alpha - 1) * 1000,
+    eps_error.permil = m_alpha_sd * 1000,
   )
-
 eps_model_fits <- 
-  tribble(
-    ~growth, ~`BP-0`, ~`BP-1`, ~`BP-2`, ~`BP-3`,
-    "fast",  -281.5,  -275.2,  -268.5,  -261.5,
-    "medium",-279.4,  -273.0,  -266.3,  -259.3,
-    "slow",  -272.8,  -266.3,  -259.5,  -252.4
-  )
-
+  eps_model %>%
+  filter(TD.hours > min(TD.hours), TD.hours < max(TD.hours))
 circle_radius <- 3
 
 # plot
@@ -284,25 +490,17 @@ p_data_w_model <-
     width = 1, show.legend = FALSE
   ) +
   # model fits
-  geom_abline(
-    data = . %>% select(bp_short) %>% unique() %>%
-        left_join(eps_model, by = "bp_short"),
-    map = aes(intercept = intercept, slope = slope, color = bp_short),
+  geom_line(
+    data = eps_model, 
+    map = aes(group = paste(growth, bp_short)),
     linetype = 3, size = 1, show.legend = FALSE
   ) +
   # data points
   geom_point(size = 5, color = "black") +
   # model fits circles
   geom_path(
-    data = . %>% select(bp_short, growth, TD.hours) %>% unique() %>%
+    data = eps_model_fits %>%
       mutate(id = row_number()) %>%
-      left_join(
-        eps_model_fits %>% 
-          pivot_longer(cols = starts_with("BP"),
-                       names_to = "bp_short",
-                       values_to = "eps_weighted_mean.permil"),
-        by = c("bp_short", "growth")
-      ) %>%
       crossing(t = seq(0, 2 * pi, length.out = 100)) %>%
       mutate(
           eps_weighted_mean.permil = eps_weighted_mean.permil +
@@ -316,8 +514,9 @@ p_data_w_model <-
   scale_color_manual(values = bp_colors) +
   scale_shape_manual(values = bp_shapes) +
   scale_y_continuous(breaks = -15 * 10:40 + 5) +
-  scale_x_continuous(breaks = 0:6*20) +
-  expand_limits(y = -295, x = c(20, 100)) +
+  scale_x_continuous(breaks = 0:6*20, expand = c(0, 0)) +
+  expand_limits(y = -295) +
+  coord_cartesian(xlim = c(19, 102)) +
   # theme
   theme_figure(grid = FALSE) + 
   theme(
@@ -590,6 +789,17 @@ plot_grid(
   p_data,
   ggdraw() + draw_image("figures/biphytanes.pdf"),
   ncol = 1, rel_heights = c(2, 0.8),
+  labels = c("A", "B")
+)
+```
+
+## Figure 4
+
+```{r "figure_4", fig.width=12.5, fig.height=6, warning = FALSE}
+# combine data overview with structures
+plot_grid(
+  p_model_alphas, p_model_lambda_th,
+  nrow = 1, rel_widths = c(1, 0.9),
   labels = c("A", "B")
 )
 ```
