@@ -40,7 +40,7 @@ knitr::opts_chunk$set(
 )
 ```
 
-> NOTE: please knit the `01_calculations.Rmd` notebook first to prepare the data used for plotting.
+> NOTE: please knit the `01_calculations.Rmd` and `02_model.Rmd` notebooks first to prepare the data used for generating the tables.
 
 # Load data
 
@@ -62,7 +62,7 @@ samples_ab_weighted_sum <- readr::read_rds("cache/samples_ab_weighted_sum.rds")
 chromatograms <- readr::read_rds("cache/chromatograms.rds")
 growth_regs <- readr::read_rds("cache/growth_regs.rds")
 fits_wide <- readr::read_rds("cache/fits_wide.rds")
-fits_sum <- readr::read_rds("cache/fits_sum.rds")
+fits_wide_w_lambdas <- readr::read_rds("cache/fits_wide_w_lambdas.rds")
 fits_alphas_sum <- readr::read_rds("cache/fits_alphas_sum.rds")
 NADPH_imbalances <- readr::read_rds("cache/NADPH_imbalances.rds")
 ```
@@ -262,12 +262,12 @@ p_data
 colors <- viridis::plasma(begin = 0.7, end = 0.0, n =3)
 
 p_model_alphas <-
-  fits_sum %>%
+  fits_wide %>%
   ggplot() +
-  aes(alpha_NADPH, alpha_FMN_NADPH, color = factor(alpha_W), shape = x_fct, linetype = x_fct) +
+  aes(alpha_NADPH, alpha_FMN_vs_NADPH, color = factor(alpha_W), shape = x_fct, linetype = x_fct) +
   geom_smooth(map = aes(color = NULL), method = "loess", formula = y ~ x, color = "black", span = 2, se = FALSE) +
   geom_errorbar(
-    map = aes(ymin = alpha_FMN_NADPH - alpha_FMN_NADPH_se, ymax = alpha_FMN_NADPH + alpha_FMN_NADPH_se),
+    map = aes(ymin = alpha_FMN_vs_NADPH - alpha_FMN_vs_NADPH_se, ymax = alpha_FMN_vs_NADPH + alpha_FMN_vs_NADPH_se),
     width = 0, linetype = 1) +
   geom_errorbarh(
     map = aes(xmin = alpha_NADPH - alpha_NADPH_se, xmax = alpha_NADPH + alpha_NADPH_se),
@@ -295,7 +295,7 @@ p_model_alphas
 alpha_TH_lims <- c(0.222, 0.566)
 alpha_TH_mid <- 0.5 * sum(alpha_TH_lims)
 
-p_model_lambda_th <- fits_wide %>%
+p_model_lambda_th <- fits_wide_w_lambdas %>%
   filter(alpha_W != 0.7) %>%
   ggplot() +
   aes(alpha_TH, lambda, color = factor(alpha_W), group = paste(alpha_W, x_fct), linetype = x_fct) +
@@ -340,7 +340,7 @@ $$
 ```{r "plot_model_NADH_NADPH", fig.width=8, fig.height=6, warning=FALSE}
 # specific example with alpha_TH_mid, alpha_W = 0.9, no water exchange
 fits_examples <- 
-  fits_wide %>% 
+  fits_wide_w_lambdas %>% 
   filter(alpha_TH == round(alpha_TH_mid, 2), alpha_W == 0.9) %>%
   # assume alpha_NADPH = 0.9
   mutate(alpha_ETC = alpha_NADPH/0.9)

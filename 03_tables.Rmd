@@ -29,7 +29,7 @@ source("scripts/table_functions.R")
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 ```
 
-> NOTE: please knit the `01_calculations.Rmd` notebook first to prepare the data used for generating the tables.
+> NOTE: please knit the `01_calculations.Rmd` and `02_model.Rmd` notebooks first to prepare the data used for generating the tables.
 
 
 # Load Data
@@ -43,6 +43,7 @@ samples_w_epsilons <- readr::read_rds("cache/samples_w_epsilons.rds")
 samples_sum <- readr::read_rds("cache/samples_sum.rds")
 samples_ab_weighted_sum <- readr::read_rds("cache/samples_ab_weighted_sum.rds")
 ring_enrichments <- readr::read_rds("cache/ring_enrichments.rds")
+fits_wide <- readr::read_rds("cache/fits_wide.rds")
 ```
 
 # Table 1: biphytanes data summary
@@ -154,6 +155,41 @@ table_3_formatted <-
   ) 
 
 export_to_excel(`numbers` = table_3, `formatted` = table_3_formatted, file = "output/table_3_ring_changes.xlsx")
+```
+
+
+# Table 4: Model parameters
+
+```{r}
+# table 4 calculations
+alpha_TH_lims <- readr::read_rds("cache/alpha_TH_lims.rds")
+calculate_lambda <- function(alpha_TH, k) alpha_TH / (1 - alpha_TH) * k
+table_4 <- 
+  fits_wide %>%
+  mutate(
+    alpha_TH_min = alpha_TH_lims[1],
+    alpha_TH_max = alpha_TH_lims[2],
+    lambda_min = map2_dbl(alpha_TH_min, k, ~calculate_lambda(.x, .y)),
+    lambda_max = map2_dbl(alpha_TH_max, k, ~calculate_lambda(.x, .y))
+  )
+
+# formatted table
+table_4_formatted <- table_4 %>%
+  transmute(
+    scenario = paste("scenario", row_number()),
+    x_fct = as.character(x_fct),
+    alpha_W = sprintf("%.1f", alpha_W),
+    `alpha_ETC * alpha_NADPH` = sprintf("%.3f \U00B1 %.3f", alpha_NADPH, alpha_NADPH_se),
+    `alpha_FMN / alpha_NADPH` = sprintf("%.2f \U00B1 %.2f", alpha_FMN_vs_NADPH, alpha_FMN_vs_NADPH_se),
+    alpha_TH = sprintf("%.3f-%.3f", alpha_TH_min, alpha_TH_max),
+    lambda = sprintf("%.3f-%.3f", lambda_min, lambda_max)
+  ) %>%
+  arrange(desc(x_fct), alpha_W) %>%
+  pivot_longer(cols = -scenario) %>%
+  pivot_wider(values_from = value, names_from = scenario)
+
+# export
+export_to_excel(`numbers` = table_4, `formatted` = table_4_formatted, file = "output/table_4_model_fits.xlsx")
 ```
 
 

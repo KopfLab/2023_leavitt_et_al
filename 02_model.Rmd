@@ -19,9 +19,11 @@ editor_options:
 ```{r "setup", message = FALSE}
 # packages
 library(tidyverse) # general data wrangling and plotting
+library(nlstools)
 
 # scripts
 source("scripts/plotting_functions.R")
+source("scripts/error_propagation.R")
 
 # global knitting options for code rendering
 knitr::opts_chunk$set(
@@ -33,6 +35,8 @@ knitr::opts_chunk$set(
   fig.path = file.path("plots", "")
 )
 ```
+
+> NOTE: please knit the `01_calculations.Rmd` notebook first to prepare the data used for plotting.
 
 # H accounting
 
@@ -166,16 +170,7 @@ R_{BP} &= \left( \alpha_W   f_{*W} + \alpha_x  f_x \right) R_W + \left(\alpha_{N
  &= \left[\alpha_W   f_{*W} + \alpha_x  f_x + 
   \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) \frac{\alpha_{ETC} \alpha_{TH}}
   {\alpha_{TH} + \lambda  (1 - X_{TD}) (1 - \alpha_{TH})}  \right] R_W \\
-\rightarrow \alpha_{BP/W} &= \frac{R_{BP}}{R_W}
-\end{aligned}
-$$
-
-$$
-\begin{aligned}
-\alpha_{BP/W} 
-  &= \alpha_W   f_{*W} + \alpha_x  f_x + \alpha_{ETC} \cdot
-  \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) \frac{\alpha_{TH}}
-  {\alpha_{TH} + \lambda  (1 - X_{TD}) (1 - \alpha_{TH})} \\
+\rightarrow \alpha_{BP/W} &= \frac{R_{BP}}{R_W} \\
   &= \alpha_W   f_{*W} + \alpha_x  f_x + 
   \alpha_{ETC} \cdot \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) \frac{1}
   {1 + \lambda  (1 - X_{TD}) (1/\alpha_{TH} - 1)} \\
@@ -185,6 +180,7 @@ $$
   \\ \rightarrow &\alpha_{TH} = \frac{\lambda}{k + \lambda}
 \end{aligned}
 $$
+
 
 # Fit
 
@@ -215,71 +211,51 @@ model_data
 
 ```{r}
 # calculate model output
-calculate_model_output <- function(n_rings, XTD, alpha_W, alpha_TH, lambda, alpha_x = alpha_W, alpha_FMN, alpha_NADPH, x) {
+calculate_model_output <- function(n_rings, XTD, alpha_W, x, alpha_NADPH, alpha_FMN_vs_NADPH, k) {
   alpha_ETC <- 1
+  alpha_x <- alpha_W
   f_W <- f_W(n_rings, x)
   f_NADPH <- f_NADPH(n_rings, x)
   f_FMN <- f_FMN(n_rings, x)
   f_x <- f_x(n_rings, x)
-  #alpha_W * f_W + alpha_x * f_x + (alpha_ETC * alpha_TH * alpha_NADPH * (alpha_FMN * f_FMN + f_NADPH)) / (alpha_TH + lambda * (1 - XTD) * (1 - alpha_TH))
-  alpha_W * f_W + alpha_x * f_x + (alpha_ETC * alpha_TH * (alpha_FMN * f_FMN + alpha_NADPH * f_NADPH)) / (alpha_TH + lambda * (1 - XTD) * (1 - alpha_TH))
+  alpha_W * f_W + alpha_x * f_x + alpha_ETC * alpha_NADPH * (f_NADPH + alpha_FMN_vs_NADPH * f_FMN) / (1 + k * (1 - XTD))
 }
 
 # non-linear least squares fit of model
-fit_model_by_nls <- function(alpha_W, alpha_TH, x) {
+#start_values <- list(alpha_NADPH = 0.1, alpha_FMN_vs_NADPH = 0.2, k = 0.1)
+set.seed(123)
+start_values <- list(alpha_NADPH = runif(1), alpha_FMN_vs_NADPH = runif(1), k = runif(1))
+message("Fitting with random start values: ")
+print(start_values)
+fit_model_by_nls <- function(alpha_W, x) {
   nls(
-    ~(calculate_model_output(n_rings, XTD, alpha_W, alpha_TH, lambda, alpha_x, alpha_FMN, alpha_NADPH, x) - alpha) * 1000, 
-    data = mutate(model_data, alpha_W = !!alpha_W, alpha_TH = !!alpha_TH, alpha_x = !!alpha_W, x = !!x),
-    start = list(lambda = 0.1, alpha_FMN = 0.2, alpha_NADPH = 0.1)
-    # note: also works for randomly chosen start values:
-    # list(lambda = runif(1), alpha_FMN = runif(1), alpha_NADPH = runif(1))
+    ~(calculate_model_output(n_rings, XTD, alpha_W, x, alpha_NADPH, alpha_FMN_vs_NADPH, k) - alpha) * 1000, 
+    data = mutate(model_data, alpha_W = !!alpha_W, x = !!x),
+    start = start_values
   )
 }
 
-# annealing fit (much slower but not at risk of getting trapped in global minimum)
-# note: cannot get this to work reliably
-fit_model_by_annealing <- function(alpha_W, alpha_TH, x, lambda) {
-  
-  # fitting function
-  fit_func <- function(x){
-    alpha_FMN <- x[1]
-    alpha_NADPH <- x[2]
-    model_data %>%
-      mutate(
-        m_alpha = calculate_model_output(
-          n_rings, XTD, !!alpha_W, !!alpha_TH, !!lambda, !!alpha_W, !!alpha_FMN, !!alpha_NADPH, !!x
-        ),
-        resid = 1000 * (alpha - m_alpha)
-      ) %>%
-      pull(resid) %>%
-      sd()
-  }
-  
-  # optimization
-  start_vals <- c(alpha_FMN = 0.2, alpha_NADPH = 0.5)
-  optimization::optim_sa(
-    fun = fit_func, start = unname(start_vals), lower = rep(0, length(start_vals)), upper = rep(2, length(start_vals)),
-    trace = TRUE, control = list(t0 = 100,nlimit = 550, t_min = 0.1, dyn_rf = FALSE, rf = 1, r = 0.7)
-  )
-}
-
-# run model for alpha TH and alpha_W combinations
+# run model for alpha_W and x combinations
 fits <- 
   crossing(
-    alpha_TH = seq(0.08, 0.99, by = 0.01),
-    #alpha_W = 0.9,
     alpha_W = c(0.5, 0.7, 0.9),
-    #x = 0
     x = c(0, 1)
   ) %>% 
   mutate(
-    nls_fit = pmap(list(alpha_W, alpha_TH, x), fit_model_by_nls),
+    nls_fit = pmap(list(alpha_W, x), fit_model_by_nls),
     nls_sum = map(nls_fit, broom::glance),
     nls_sigma = map_dbl(nls_sum, ~.x$sigma),
-    coefs = map(nls_fit, broom::tidy)
+    nls_coefs = map(nls_fit, ~{
+      left_join(
+        broom::tidy(.x),
+        nlstools::confint2(.x, level = 0.95, method = "asymptotic") %>% 
+          as_tibble(rownames = "term"),
+        by = "term"
+      )
+    })
   ) %>%
   select(-nls_fit, -nls_sum) %>%
-  unnest(coefs)
+  unnest(nls_coefs)
 ```
 
 
@@ -291,7 +267,7 @@ fits_wide <- fits %>%
   select(-statistic, -p.value) %>%
   pivot_wider(
     names_from = term,
-    values_from = c(estimate, std.error)
+    values_from = c(estimate, std.error, `2.5 %`, `97.5 %`)
   ) %>%
   transmute(
     resid.permil = nls_sigma,
@@ -300,48 +276,36 @@ fits_wide <- fits %>%
       "none" = "0",
       "max" = "1"
     ),
-    alpha_TH = alpha_TH,
     alpha_W = alpha_W,
-    alpha_FMN = estimate_alpha_FMN,
-    alpha_FMN_se = std.error_alpha_FMN,
     alpha_NADPH = estimate_alpha_NADPH,
     alpha_NADPH_se = std.error_alpha_NADPH,
-    lambda = estimate_lambda,
-    lambda_se = std.error_lambda
+    alpha_NADPH_ci_2.5 = `2.5 %_alpha_NADPH`,
+    alpha_NADPH_ci_97.5 = `97.5 %_alpha_NADPH`,
+    alpha_FMN_vs_NADPH = estimate_alpha_FMN_vs_NADPH,
+    alpha_FMN_vs_NADPH_se = std.error_alpha_FMN_vs_NADPH,
+    alpha_FMN_vs_NADPH_ci_2.5 = `2.5 %_alpha_FMN_vs_NADPH`,
+    alpha_FMN_vs_NADPH_ci_97.5 = `97.5 %_alpha_FMN_vs_NADPH`,
+    k = estimate_k,
+    k_se = std.error_k
   ) 
 head(fits_wide)
 
-# summarize for each x & alpha_W combination
-fits_sum <- 
+# alpha_TH and lambda calculated from k
+calculate_lambda_expr <- rlang::expr(alpha_TH / (1 - alpha_TH) * k)
+alpha_TH_lims <- c(0.222, 0.566) # literature constraints
+fits_wide_w_lambdas <-
   fits_wide %>%
-  group_by(x, x_fct, alpha_W) %>%
-  summarize(
-    resid_mean.permil = mean(resid.permil),
-    #lambda_min = quantile(lambda, probs = 0.05)[[1]],
-    #lambda_max = quantile(lambda, probs = 0.95)[[1]],
-    #lambda_median = median(lambda),
-    alpha_FMN_NADPH = mean(alpha_FMN/alpha_NADPH),
-    alpha_FMN_NADPH_se = 
-      max(alpha_FMN/alpha_NADPH * 
-            sqrt(
-              (alpha_FMN_se/alpha_FMN)^2 + (alpha_NADPH_se/alpha_NADPH)^2 -
-              2 * cov(alpha_FMN, alpha_NADPH)/(alpha_NADPH * alpha_FMN)
-            )
-      ),
-    alpha_FMN = mean(alpha_FMN),
-    alpha_FMN_se = max(alpha_FMN_se),
-    alpha_NADPH = mean(alpha_NADPH), 
-    alpha_NADPH_se = max(alpha_NADPH_se),
-    .groups = "drop"
+  crossing(alpha_TH = seq(0.08, 0.99, by = 0.01)) %>%
+  mutate(
+    lambda = eval(calculate_lambda_expr),
+    lambda_se = propagate_error(!!calculate_lambda_expr, dalpha_TH = 0, dk = k_se)
   )
-head(fits_sum)
 
 # save in cache
+write_rds(alpha_TH_lims, "cache/alpha_TH_lims.rds")
 write_rds(fits_wide, "cache/fits_wide.rds")
-write_rds(fits_sum, "cache/fits_sum.rds")
+write_rds(fits_wide_w_lambdas, "cache/fits_wide_w_lambdas.rds")
 ```
-
-
 
 
 
@@ -366,9 +330,19 @@ fits_alphas <-
   mutate(
     XTD = calculate_XTD(TD.hours),
     m_alpha = calculate_model_output(
-      n_rings, XTD, alpha_W, alpha_TH, lambda, alpha_W, alpha_FMN, alpha_NADPH, x
+      n_rings, XTD, alpha_W, x, alpha_NADPH, alpha_FMN_vs_NADPH, k
     )
   ) 
+
+# standard deviation of residuals - recalculation to check
+fits_alphas %>% 
+  filter(!is.na(alpha)) %>%
+  group_by(model_id, x, x_fct, alpha_W, alpha_NADPH, alpha_FMN_vs_NADPH, k, resid.permil) %>%
+  summarize(
+    # degrees of freedom based on the 3 parameter fits
+    resid_recalc.permil = sqrt(sum((m_alpha * 1000 - alpha * 1000)^2) / (n() - 3)),
+    .groups = "drop"
+  )
 
 # averages across all model fits
 fits_alphas_sum <-
@@ -380,16 +354,6 @@ fits_alphas_sum <-
     .groups = "drop"
   ) %>%
   arrange(growth, TD.hours, bp_short)
-
-# standard deviation of resiuals
-fits_alphas %>% 
-  filter(!is.na(alpha)) %>%
-  group_by(model_id, x, x_fct, alpha_W, alpha_FMN, alpha_NADPH, lambda, resid.permil) %>%
-  summarize(
-    # degrees of freedom based on the 3 parameter fits
-    resid_recalc.permil = sqrt(sum((m_alpha * 1000 - alpha * 1000)^2) / (n() - 3)),
-    .groups = "drop"
-  )
 
 # save in cache
 write_rds(fits_alphas_sum, "cache/fits_alphas_sum.rds")
@@ -453,7 +417,7 @@ fits_growth_regs %>%
 ```{r}
 # calculate NADPh imbalance based on the alpha_TH mid value
 NADPH_imbalances <- 
-  fits_wide %>%
+  fits_wide_w_lambdas %>%
   crossing(metadata) %>%
   mutate(
     XTD = calculate_XTD(TD.hours),
@@ -464,14 +428,6 @@ NADPH_imbalances <-
 # save in cache
 write_rds(NADPH_imbalances, "cache/NADPH_imbalances.rds")
 ```
-
-# DRAFT Table 4
-
-I forgot to send it yesterday - in case it's helpful, here's the actual numerical values from the NLS fit. 
-Basically exactly the same for aE · aNADPH as before for the scenario in bold (no H2O exchange, aW=0.9).
-GGR fractionation of 0.256. Could gave both of these more specific values if setting aNADPH to 0.9.
-Little bit bigger range for lambda (0.017 - 0.081 instead of 0.013 - 0.061) for that scenario.
-
 
 
 # DRAFT literature data
