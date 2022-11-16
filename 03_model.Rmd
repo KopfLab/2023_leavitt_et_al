@@ -1,0 +1,490 @@
+---
+title: "Model"
+date: "Last knitted on `r format(Sys.Date(), '%d %b %Y')`"
+author: "Leavitt, Kopf, Weber, Pearson"
+output:
+  html_document: 
+    df_print: paged
+    number_sections: yes
+    toc: yes
+    toc_float: true
+    toc_depth: 3
+    code_folding: show
+editor_options:
+  chunk_output_type: console # switch to 'inline' if preferred
+---
+
+# Setup
+
+```{r "setup", message = FALSE}
+# packages
+library(tidyverse) # general data wrangling and plotting
+
+# scripts
+source("scripts/plotting_functions.R")
+
+# global knitting options for code rendering
+knitr::opts_chunk$set(
+  eval = TRUE, echo = FALSE,
+  collapse = TRUE, comment = "#>",
+  dev = c("png", "pdf", "postscript"),
+  dev.args = list(pdf = list(encoding = "WinAnsi", useDingbats = FALSE)),
+  fig.keep = "all",
+  fig.path = file.path("plots", "")
+)
+```
+
+# H accounting
+
+$$
+\begin{aligned}
+n &= 80 - 2 \cdot r \\
+f_{S} &= \frac{24 + (23 + 1/3) \cdot (1 - x) - r}{n} \\
+f_{LS_W} &= \frac{2/3 \cdot (1 - x)}{n} \\
+f_{RS_W} &=  \frac{r}{n} \\
+f_{GGR_W} &= \frac{8 - r}{n} \\
+f_{LS_{NADPH}} &= \frac{16}{n} \\
+f_{GGR_{FMN}} &= \frac{8 - r}{n} \\
+f_{x} &= \frac{24 \cdot x}{n} 
+\end{aligned}
+$$
+
+
+## N. maritimus
+
+With $H_{Act} = 2/3 \cdot H_{H2O} + 1/3 \cdot H_{NADPH}$ for *N. maritimus*:
+
+$$
+\begin{aligned}
+f_{*A} &= 0 \\
+f_{*W} &= 2/3 \cdot f_{A_W} + f_{LS_W} + f_{GGR_W} + f_{RS_W} \\
+ &= \frac{16 + (15 + 5/9) \cdot (1 - x) - 2/3 \cdot r}{n} + \frac{2/3 \cdot (1 - x)}{n} + \frac{8 - r}{n} + \frac{r}{n} \\
+ & = \frac{24 + 146/9 \cdot (1 - x) - 2/3 \cdot r}{80 - 2 \cdot r} \\
+f_{*NADPH} &= 1/3 \cdot f_{A} + f_{LS_{NADPH}} \\
+  &= \frac{8 + (7 + 7/9) \cdot (1 - x) - 1/3 \cdot r}{n} + \frac{16}{n} \\
+  &= \frac{24 + 70/9 \cdot (1 - x) - 1/3 \cdot r}{80 - 2 \cdot r} \\
+\end{aligned}
+$$
+
+## Functions
+
+```{r}
+# number of hydrogens
+n_BP <- function(nr) 80 - 2 * nr
+n_A <- function(x, nr) 24 + (23 + 1/3) * (1 - x) - nr
+n_LS_W <- function(x) 2/3 * (1 - x)
+n_GGR_W <- function(nr) 8 - nr
+n_RS_W <- function(nr) nr
+n_A_W <- function(x, nr) 2/3 * n_A(x, nr)
+n_LS_NADPH <- function() 16
+n_A_NADPH <- function (x, nr) 1/3 * n_A(x, nr)
+n_FMN <- function(nr) 8 - nr
+n_x <- function(x) 24 * x
+
+f_W <- function(nr, x) (n_LS_W(x) + n_GGR_W(nr) + n_RS_W(nr) + n_A_W(x, nr)) / n_BP(nr)
+f_NADPH <- function(nr, x) (n_LS_NADPH() + n_A_NADPH(x, nr)) / n_BP(nr)
+f_FMN <- function(nr, x) n_FMN(nr) / n_BP(nr)
+f_x <- function(nr, x) n_x(x) / n_BP(nr)
+```
+
+## Results
+
+```{r}
+# H accounting calculations
+H_accounting <- 
+  tibble(
+    # FIXME: scenarios but with GGR H instead of FD
+    scenario = c("Scenario 2", "Scenario 4"),
+    x = c(0, 1)
+  ) %>% 
+  crossing(select(readxl::read_excel("data/compounds.xlsx"), bp_short, n_rings)) %>%
+  mutate(
+    n_BP = n_BP(n_rings),
+    n_A_W = n_A_W(x, n_rings),
+    n_LS_W = n_LS_W(x),
+    n_GGR_W = n_GGR_W(n_rings),
+    n_RS_W = n_RS_W(n_rings),
+    n_W = n_A_W + n_LS_W + n_GGR_W + n_RS_W,
+    n_A_NADPH = n_A_NADPH(x, n_rings),
+    n_LS_NADPH = n_LS_NADPH(),
+    n_NADPH = n_A_NADPH + n_LS_NADPH,
+    n_FMN = n_FMN(n_rings),
+    n_x = n_x(x),
+    check = near(n_A_W + n_LS_W + n_GGR_W + n_RS_W + n_A_NADPH + n_LS_NADPH + n_FMN + n_x, n_BP)
+  )
+
+# save in cache
+write_rds(H_accounting, "cache/H_accounting.rds")
+```
+
+
+# Model
+
+## BP Components
+
+$$
+\begin{aligned}
+\text{all }&\text{biphytane producers:} \\
+BP &= f_A + (f_{LS_W} + f_{GGR_W} + f_{RS_W}) + f_{LS_{NADPH}} + f_{GGR_{FMN}} + f_x \\
+ &= f_A + f_W + f_{NADPH} + f_{FMN} +f_x \\
+ \text{N. }&\text{maritimus:} \\
+ BP &= (f_{A_W} + f_{LS_W} + f_{GGR_W} + f_{RS_W}) + (f_{A_{NADPH}} + f_{LS_{NADPH}}) + f_{GGR_{FMN}} + f_x \\
+ &= f_{*W} + f_{*NADPH} + f_{FMN} +f_x \\
+\end{aligned}
+$$
+
+## Elecron flux
+
+Parametrizing $f_L$ (NADH loss terms) with doubling time:
+
+$$
+\begin{aligned}
+f_L &= \frac{\phi_{L}}{\phi_{ETC}} = 1 - \frac{\phi_{TH}}{\phi_{ETC}} = 1 - f_N \\
+f_L &= \lambda \cdot (1 - X_{TD}) \\
+\text{B} &= \frac{- \phi_{NADH\rightarrow NADPH}}{\phi_{ETC}} = -f_N = f_L - 1
+\end{aligned}
+$$
+
+## R_NADPH
+
+$$
+\begin{aligned}
+R_{NADH} &= 
+  \frac{\alpha_{ETC} \cdot R_W}{\alpha_{TH} + f_L \cdot (1 - \alpha_{TH})} \\
+  &= \frac{\alpha_{ETC} \cdot R_W}{\alpha_{TH} + \lambda \cdot (1 - X_{TD}) \cdot (1 - \alpha_{TH})} \\
+R_{NADPH} &= \alpha_{TH} \cdot R_{NADH} \\
+  &= \frac{\alpha_{TH} \cdot \alpha_{ETC} \cdot R_W}{\alpha_{TH} + \lambda \cdot (1 - X_{TD}) \cdot (1 - \alpha_{TH})} \\
+
+\end{aligned}
+$$
+
+## R_BP (N. maritimus)
+
+$$
+\begin{aligned}
+R_{BP} &= \left( \alpha_W   f_{*W} + \alpha_x  f_x \right) R_W + \left(\alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) R_{NADPH} \\
+ &= \left[\alpha_W   f_{*W} + \alpha_x  f_x + 
+  \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) \frac{\alpha_{ETC} \alpha_{TH}}
+  {\alpha_{TH} + \lambda  (1 - X_{TD}) (1 - \alpha_{TH})}  \right] R_W \\
+\rightarrow \alpha_{BP/W} &= \frac{R_{BP}}{R_W}
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+\alpha_{BP/W} 
+  &= \alpha_W   f_{*W} + \alpha_x  f_x + \alpha_{ETC} \cdot
+  \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) \frac{\alpha_{TH}}
+  {\alpha_{TH} + \lambda  (1 - X_{TD}) (1 - \alpha_{TH})} \\
+  &= \alpha_W   f_{*W} + \alpha_x  f_x + 
+  \alpha_{ETC} \cdot \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) \frac{1}
+  {1 + \lambda  (1 - X_{TD}) (1/\alpha_{TH} - 1)} \\
+  &= \alpha_W   f_{*W} + \alpha_x  f_x +\alpha_{ETC} \cdot \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) \cdot \frac{1}{1 + k \cdot (1 - X_{TD})}\\
+\text{with } &k = \frac{\lambda}{\alpha_{TH}} - \lambda 
+  \\ \rightarrow &\lambda = \frac{\alpha_{TH}}{1 - \alpha_{TH}} \cdot k
+  \\ \rightarrow &\alpha_{TH} = \frac{\lambda}{k + \lambda}
+\end{aligned}
+$$
+
+# Fit
+
+## Data
+
+```{r}
+TDmin <- 20
+TDmax <- 120
+calculate_XTD <- function(TD.hours, min = TDmin, max = TDmax) {
+  return((TD.hours - min) / (max - min))
+}
+
+compounds <- readxl::read_excel("data/compounds.xlsx")
+metadata <- readxl::read_excel("data/metadata.xlsx")
+model_data <- readr::read_rds("cache/samples_sum.rds") %>%
+  left_join(compounds, by = "compound") %>%
+  left_join(metadata, by = c("organism", "growth")) %>%
+  select(bp_short, n_rings, eps = eps_weighted_mean.permil, growth, TD.hours) %>%
+  mutate(
+    alpha = eps/1000 + 1,
+    XTD = calculate_XTD(TD.hours)
+  )
+
+model_data
+```
+
+## NLS
+
+```{r}
+# calculate model output
+calculate_model_output <- function(n_rings, XTD, alpha_W, alpha_TH, lambda, alpha_x = alpha_W, alpha_FMN, alpha_NADPH, x) {
+  alpha_ETC <- 1
+  f_W <- f_W(n_rings, x)
+  f_NADPH <- f_NADPH(n_rings, x)
+  f_FMN <- f_FMN(n_rings, x)
+  f_x <- f_x(n_rings, x)
+  #alpha_W * f_W + alpha_x * f_x + (alpha_ETC * alpha_TH * alpha_NADPH * (alpha_FMN * f_FMN + f_NADPH)) / (alpha_TH + lambda * (1 - XTD) * (1 - alpha_TH))
+  alpha_W * f_W + alpha_x * f_x + (alpha_ETC * alpha_TH * (alpha_FMN * f_FMN + alpha_NADPH * f_NADPH)) / (alpha_TH + lambda * (1 - XTD) * (1 - alpha_TH))
+}
+
+# non-linear least squares fit of model
+fit_model_by_nls <- function(alpha_W, alpha_TH, x) {
+  nls(
+    ~(calculate_model_output(n_rings, XTD, alpha_W, alpha_TH, lambda, alpha_x, alpha_FMN, alpha_NADPH, x) - alpha) * 1000, 
+    data = mutate(model_data, alpha_W = !!alpha_W, alpha_TH = !!alpha_TH, alpha_x = !!alpha_W, x = !!x),
+    start = list(lambda = 0.1, alpha_FMN = 0.2, alpha_NADPH = 0.1)
+    # note: also works for randomly chosen start values:
+    # list(lambda = runif(1), alpha_FMN = runif(1), alpha_NADPH = runif(1))
+  )
+}
+
+# annealing fit (much slower but not at risk of getting trapped in global minimum)
+# note: cannot get this to work reliably
+fit_model_by_annealing <- function(alpha_W, alpha_TH, x, lambda) {
+  
+  # fitting function
+  fit_func <- function(x){
+    alpha_FMN <- x[1]
+    alpha_NADPH <- x[2]
+    model_data %>%
+      mutate(
+        m_alpha = calculate_model_output(
+          n_rings, XTD, !!alpha_W, !!alpha_TH, !!lambda, !!alpha_W, !!alpha_FMN, !!alpha_NADPH, !!x
+        ),
+        resid = 1000 * (alpha - m_alpha)
+      ) %>%
+      pull(resid) %>%
+      sd()
+  }
+  
+  # optimization
+  start_vals <- c(alpha_FMN = 0.2, alpha_NADPH = 0.5)
+  optimization::optim_sa(
+    fun = fit_func, start = unname(start_vals), lower = rep(0, length(start_vals)), upper = rep(2, length(start_vals)),
+    trace = TRUE, control = list(t0 = 100,nlimit = 550, t_min = 0.1, dyn_rf = FALSE, rf = 1, r = 0.7)
+  )
+}
+
+# run model for alpha TH and alpha_W combinations
+fits <- 
+  crossing(
+    alpha_TH = seq(0.08, 0.99, by = 0.01),
+    #alpha_W = 0.9,
+    alpha_W = c(0.5, 0.7, 0.9),
+    #x = 0
+    x = c(0, 1)
+  ) %>% 
+  mutate(
+    nls_fit = pmap(list(alpha_W, alpha_TH, x), fit_model_by_nls),
+    nls_sum = map(nls_fit, broom::glance),
+    nls_sigma = map_dbl(nls_sum, ~.x$sigma),
+    coefs = map(nls_fit, broom::tidy)
+  ) %>%
+  select(-nls_fit, -nls_sum) %>%
+  unnest(coefs)
+```
+
+
+# Results
+
+```{r}
+# pivot wide
+fits_wide <- fits %>%
+  select(-statistic, -p.value) %>%
+  pivot_wider(
+    names_from = term,
+    values_from = c(estimate, std.error)
+  ) %>%
+  transmute(
+    resid.permil = nls_sigma,
+    x, 
+    x_fct = as_factor(x) %>% fct_recode(
+      "none" = "0",
+      "max" = "1"
+    ),
+    alpha_TH = alpha_TH,
+    alpha_W = alpha_W,
+    alpha_FMN = estimate_alpha_FMN,
+    alpha_FMN_se = std.error_alpha_FMN,
+    alpha_NADPH = estimate_alpha_NADPH,
+    alpha_NADPH_se = std.error_alpha_NADPH,
+    lambda = estimate_lambda,
+    lambda_se = std.error_lambda
+  ) 
+head(fits_wide)
+
+# summarize for each x & alpha_W combination
+fits_sum <- 
+  fits_wide %>%
+  group_by(x, x_fct, alpha_W) %>%
+  summarize(
+    resid_mean.permil = mean(resid.permil),
+    #lambda_min = quantile(lambda, probs = 0.05)[[1]],
+    #lambda_max = quantile(lambda, probs = 0.95)[[1]],
+    #lambda_median = median(lambda),
+    alpha_FMN_NADPH = mean(alpha_FMN/alpha_NADPH),
+    alpha_FMN_NADPH_se = 
+      max(alpha_FMN/alpha_NADPH * 
+            sqrt(
+              (alpha_FMN_se/alpha_FMN)^2 + (alpha_NADPH_se/alpha_NADPH)^2 -
+              2 * cov(alpha_FMN, alpha_NADPH)/(alpha_NADPH * alpha_FMN)
+            )
+      ),
+    alpha_FMN = mean(alpha_FMN),
+    alpha_FMN_se = max(alpha_FMN_se),
+    alpha_NADPH = mean(alpha_NADPH), 
+    alpha_NADPH_se = max(alpha_NADPH_se),
+    .groups = "drop"
+  )
+head(fits_sum)
+
+# save in cache
+write_rds(fits_wide, "cache/fits_wide.rds")
+write_rds(fits_sum, "cache/fits_sum.rds")
+```
+
+
+
+
+
+## Alphas from model fits
+
+```{r}
+# model points (TD of original data point + min and max)
+model_points <- 
+  bind_rows(
+    model_data %>% select(bp_short, n_rings, growth, TD.hours, alpha),
+    model_data %>%
+      select(bp_short, growth, n_rings) %>% unique() %>%
+      crossing(TD.hours = c(TDmin, TDmax))
+  ) %>%
+  arrange(bp_short, TD.hours)
+
+# calculate alpha values from model fits
+fits_alphas <- 
+  fits_wide %>%
+  mutate(model_id = row_number()) %>%
+  crossing(model_points) %>%
+  mutate(
+    XTD = calculate_XTD(TD.hours),
+    m_alpha = calculate_model_output(
+      n_rings, XTD, alpha_W, alpha_TH, lambda, alpha_W, alpha_FMN, alpha_NADPH, x
+    )
+  ) 
+
+# averages across all model fits
+fits_alphas_sum <-
+  fits_alphas %>%
+  group_by(bp_short, n_rings, growth, TD.hours) %>%
+  summarize(
+    m_alpha_sd = sd(m_alpha),
+    m_alpha = mean(m_alpha),
+    .groups = "drop"
+  ) %>%
+  arrange(growth, TD.hours, bp_short)
+
+# standard deviation of resiuals
+fits_alphas %>% 
+  filter(!is.na(alpha)) %>%
+  group_by(model_id, x, x_fct, alpha_W, alpha_FMN, alpha_NADPH, lambda, resid.permil) %>%
+  summarize(
+    # degrees of freedom based on the 3 parameter fits
+    resid_recalc.permil = sqrt(sum((m_alpha * 1000 - alpha * 1000)^2) / (n() - 3)),
+    .groups = "drop"
+  )
+
+# save in cache
+write_rds(fits_alphas_sum, "cache/fits_alphas_sum.rds")
+```
+
+## Ring enrichment
+
+```{r}
+# calculate model ring enrichments
+fits_ring_enrichments <-
+  fits_alphas %>%
+  select(model_id, n_rings, TD.hours, m_alpha) %>%
+  { full_join(., ., by = c("model_id", "TD.hours"))  } %>%
+  filter(n_rings.x > n_rings.y) %>%
+  mutate(
+   D_eps_per_ring = 1000 * (m_alpha.y - m_alpha.x)/(n_rings.y - n_rings.x)
+  ) %>%
+  group_by(n_rings.x) %>%
+  summarize(
+    D_eps_per_ring_sd = sd(D_eps_per_ring),
+    D_eps_per_ring_median = median(D_eps_per_ring),
+    D_eps_per_ring = mean(D_eps_per_ring),
+    .groups = "drop"
+  )
+
+# overall
+fits_ring_enrichments %>%
+  summarize(
+    permil_per_ring_mean = mean(D_eps_per_ring),
+    permil_per_ring_median = median(D_eps_per_ring),
+    permil_per_ring_sd = sd(D_eps_per_ring)
+  )
+```
+
+## Growth regression
+
+```{r}
+# calculate model growth regressions
+fits_growth_regs <- 
+  fits_alphas_sum %>%
+  nest(data = -c(bp_short, n_rings)) %>%
+  mutate(
+    fit = map(data, ~lm(m_alpha ~ TD.hours, data = .x)),
+    estimates = map(fit, broom::tidy)
+  ) %>%
+  unnest(estimates) %>% 
+  filter(term == "TD.hours") %>%
+  select(-fit)
+
+# overall
+fits_growth_regs %>%
+  summarize(
+    permil_per_hour_mean = 1000 * mean(estimate),
+    permil_per_hour_median= 1000 * median(estimate),
+    permil_per_hour_sd = 1000 * sd(estimate)
+  )
+```
+
+## NADPH imbalance
+
+```{r}
+# calculate NADPh imbalance based on the alpha_TH mid value
+NADPH_imbalances <- 
+  fits_wide %>%
+  crossing(metadata) %>%
+  mutate(
+    XTD = calculate_XTD(TD.hours),
+    fL = lambda * (1 - XTD),
+    NADPH_imb = fL - 1
+  )
+
+# save in cache
+write_rds(NADPH_imbalances, "cache/NADPH_imbalances.rds")
+```
+
+# DRAFT Table 4
+
+I forgot to send it yesterday - in case it's helpful, here's the actual numerical values from the NLS fit. 
+Basically exactly the same for aE · aNADPH as before for the scenario in bold (no H2O exchange, aW=0.9).
+GGR fractionation of 0.256. Could gave both of these more specific values if setting aNADPH to 0.9.
+Little bit bigger range for lambda (0.017 - 0.081 instead of 0.013 - 0.061) for that scenario.
+
+
+
+# DRAFT literature data
+
+$$
+\begin{aligned}
+R_{NADPH} &= \alpha_{ETC} \cdot R_W \\
+R_{BP} &= \left( \alpha_W   f_{W} + \alpha_x  f_x \right) R_W + \left(\alpha_{NADPH} f_{NADPH} + \alpha_{FMN} f_{FMN} \right) R_{NADPH} \\
+\rightarrow \alpha_{BP/W} &= \alpha_W   f_{W} + \alpha_x  f_x + 
+  \left( \alpha_{NADPH} f_{NADPH} + \alpha_{FMN} f_{FMN} \right) \alpha_{ETC}
+
+\end{aligned}
+$$
+
+# TODO: fit these data with variable fw and fNADPH (fmn somewhat fixed, NADPH assuming minimum form MVA pathway, fx = 0). 
+
