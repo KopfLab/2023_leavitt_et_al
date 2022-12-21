@@ -264,10 +264,10 @@ colors <- viridis::plasma(begin = 0.7, end = 0.0, n =3)
 p_model_alphas <-
   fits_wide %>%
   ggplot() +
-  aes(alpha_NADPH, alpha_FMN_vs_NADPH, color = factor(alpha_W), shape = x_fct, linetype = x_fct) +
+  aes(alpha_NADPH, alpha_FAD_vs_NADPH, color = factor(alpha_W), shape = x_fct, linetype = x_fct) +
   geom_smooth(map = aes(color = NULL), method = "loess", formula = y ~ x, color = "black", span = 2, se = FALSE) +
   geom_errorbar(
-    map = aes(ymin = alpha_FMN_vs_NADPH - alpha_FMN_vs_NADPH_se, ymax = alpha_FMN_vs_NADPH + alpha_FMN_vs_NADPH_se),
+    map = aes(ymin = alpha_FAD_vs_NADPH - alpha_FAD_vs_NADPH_se, ymax = alpha_FAD_vs_NADPH + alpha_FAD_vs_NADPH_se),
     width = 0, linetype = 1) +
   geom_errorbarh(
     map = aes(xmin = alpha_NADPH - alpha_NADPH_se, xmax = alpha_NADPH + alpha_NADPH_se),
@@ -278,7 +278,7 @@ p_model_alphas <-
   scale_y_continuous(sec.axis = sec_permil_axis()) +
   labs(
     x = expression(alpha[ETC] %.% alpha[NADPH]),
-    y = expression(alpha[FMN] / alpha[NADPH]),
+    y = expression(alpha[FAD] / alpha[NADPH]),
     color = expression(alpha[W]),#expression(alpha[W] ~"&"~ alpha[ex]),
     shape = expression("H"[2]*"O exch."), 
     linetype = expression("H"[2]*"O exch.")

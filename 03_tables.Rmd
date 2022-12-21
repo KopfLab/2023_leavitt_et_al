@@ -135,7 +135,7 @@ table_3 <- readr::read_rds("cache/H_accounting.rds") %>%
   mutate(
     Df_w_and_x = (f_W + f_x) - (f_W[bp_short == "BP-0"] + f_x[bp_short == "BP-0"]),
     Df_NADPH = f_NADPH - f_NADPH[bp_short == "BP-0"],
-    Df_FMN = f_FMN - f_FMN[bp_short == "BP-0"]
+    Df_FAD = f_FAD - f_FAD[bp_short == "BP-0"]
   ) %>%
   ungroup() %>%
   filter(n_rings > 0) %>%
@@ -180,7 +180,7 @@ table_4_formatted <- table_4 %>%
     x_fct = as.character(x_fct),
     alpha_W = sprintf("%.1f", alpha_W),
     `alpha_ETC * alpha_NADPH` = sprintf("%.3f \U00B1 %.3f", alpha_NADPH, alpha_NADPH_se),
-    `alpha_FMN / alpha_NADPH` = sprintf("%.2f \U00B1 %.2f", alpha_FMN_vs_NADPH, alpha_FMN_vs_NADPH_se),
+    `alpha_FAD / alpha_NADPH` = sprintf("%.2f \U00B1 %.2f", alpha_FAD_vs_NADPH, alpha_FAD_vs_NADPH_se),
     alpha_TH = sprintf("%.3f-%.3f", alpha_TH_min, alpha_TH_max),
     lambda = sprintf("%.3f-%.3f", lambda_min, lambda_max)
   ) %>%

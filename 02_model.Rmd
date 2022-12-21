@@ -48,7 +48,7 @@ f_{LS_W} &= \frac{2/3 \cdot (1 - x)}{n} \\
 f_{RS_W} &=  \frac{r}{n} \\
 f_{GGR_W} &= \frac{8 - r}{n} \\
 f_{LS_{NADPH}} &= \frac{16}{n} \\
-f_{GGR_{FMN}} &= \frac{8 - r}{n} \\
+f_{GGR_{FAD}} &= \frac{8 - r}{n} \\
 f_{x} &= \frac{24 \cdot x}{n} 
 \end{aligned}
 $$
@@ -82,12 +82,12 @@ n_RS_W <- function(nr) nr
 n_A_W <- function(x, nr) 2/3 * n_A(x, nr)
 n_LS_NADPH <- function() 16
 n_A_NADPH <- function (x, nr) 1/3 * n_A(x, nr)
-n_FMN <- function(nr) 8 - nr
+n_FAD <- function(nr) 8 - nr
 n_x <- function(x) 24 * x
 
 f_W <- function(nr, x) (n_LS_W(x) + n_GGR_W(nr) + n_RS_W(nr) + n_A_W(x, nr)) / n_BP(nr)
 f_NADPH <- function(nr, x) (n_LS_NADPH() + n_A_NADPH(x, nr)) / n_BP(nr)
-f_FMN <- function(nr, x) n_FMN(nr) / n_BP(nr)
+f_FAD <- function(nr, x) n_FAD(nr) / n_BP(nr)
 f_x <- function(nr, x) n_x(x) / n_BP(nr)
 ```
 
@@ -112,9 +112,9 @@ H_accounting <-
     n_A_NADPH = n_A_NADPH(x, n_rings),
     n_LS_NADPH = n_LS_NADPH(),
     n_NADPH = n_A_NADPH + n_LS_NADPH,
-    n_FMN = n_FMN(n_rings),
+    n_FAD = n_FAD(n_rings),
     n_x = n_x(x),
-    check = near(n_A_W + n_LS_W + n_GGR_W + n_RS_W + n_A_NADPH + n_LS_NADPH + n_FMN + n_x, n_BP)
+    check = near(n_A_W + n_LS_W + n_GGR_W + n_RS_W + n_A_NADPH + n_LS_NADPH + n_FAD + n_x, n_BP)
   )
 
 # save in cache
@@ -129,11 +129,11 @@ write_rds(H_accounting, "cache/H_accounting.rds")
 $$
 \begin{aligned}
 \text{all }&\text{biphytane producers:} \\
-BP &= f_A + (f_{LS_W} + f_{GGR_W} + f_{RS_W}) + f_{LS_{NADPH}} + f_{GGR_{FMN}} + f_x \\
- &= f_A + f_W + f_{NADPH} + f_{FMN} +f_x \\
+BP &= f_A + (f_{LS_W} + f_{GGR_W} + f_{RS_W}) + f_{LS_{NADPH}} + f_{GGR_{FAD}} + f_x \\
+ &= f_A + f_W + f_{NADPH} + f_{FAD} +f_x \\
  \text{N. }&\text{maritimus:} \\
- BP &= (f_{A_W} + f_{LS_W} + f_{GGR_W} + f_{RS_W}) + (f_{A_{NADPH}} + f_{LS_{NADPH}}) + f_{GGR_{FMN}} + f_x \\
- &= f_{*W} + f_{*NADPH} + f_{FMN} +f_x \\
+ BP &= (f_{A_W} + f_{LS_W} + f_{GGR_W} + f_{RS_W}) + (f_{A_{NADPH}} + f_{LS_{NADPH}}) + f_{GGR_{FAD}} + f_x \\
+ &= f_{*W} + f_{*NADPH} + f_{FAD} +f_x \\
 \end{aligned}
 $$
 
@@ -166,15 +166,15 @@ $$
 
 $$
 \begin{aligned}
-R_{BP} &= \left( \alpha_W   f_{*W} + \alpha_x  f_x \right) R_W + \left(\alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) R_{NADPH} \\
+R_{BP} &= \left( \alpha_W   f_{*W} + \alpha_x  f_x \right) R_W + \left(\alpha_{NADPH} f_{*NADPH} + \alpha_{FAD} f_{FAD} \right) R_{NADPH} \\
  &= \left[\alpha_W   f_{*W} + \alpha_x  f_x + 
-  \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) \frac{\alpha_{ETC} \alpha_{TH}}
+  \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FAD} f_{FAD} \right) \frac{\alpha_{ETC} \alpha_{TH}}
   {\alpha_{TH} + \lambda  (1 - X_{TD}) (1 - \alpha_{TH})}  \right] R_W \\
 \rightarrow \alpha_{BP/W} &= \frac{R_{BP}}{R_W} \\
   &= \alpha_W   f_{*W} + \alpha_x  f_x + 
-  \alpha_{ETC} \cdot \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) \frac{1}
+  \alpha_{ETC} \cdot \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FAD} f_{FAD} \right) \frac{1}
   {1 + \lambda  (1 - X_{TD}) (1/\alpha_{TH} - 1)} \\
-  &= \alpha_W   f_{*W} + \alpha_x  f_x +\alpha_{ETC} \cdot \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FMN} f_{FMN} \right) \cdot \frac{1}{1 + k \cdot (1 - X_{TD})}\\
+  &= \alpha_W   f_{*W} + \alpha_x  f_x +\alpha_{ETC} \cdot \left( \alpha_{NADPH} f_{*NADPH} + \alpha_{FAD} f_{FAD} \right) \cdot \frac{1}{1 + k \cdot (1 - X_{TD})}\\
 \text{with } &k = \frac{\lambda}{\alpha_{TH}} - \lambda 
   \\ \rightarrow &\lambda = \frac{\alpha_{TH}}{1 - \alpha_{TH}} \cdot k
   \\ \rightarrow &\alpha_{TH} = \frac{\lambda}{k + \lambda}
@@ -211,25 +211,25 @@ model_data
 
 ```{r}
 # calculate model output
-calculate_model_output <- function(n_rings, XTD, alpha_W, x, alpha_NADPH, alpha_FMN_vs_NADPH, k) {
+calculate_model_output <- function(n_rings, XTD, alpha_W, x, alpha_NADPH, alpha_FAD_vs_NADPH, k) {
   alpha_ETC <- 1
   alpha_x <- alpha_W
   f_W <- f_W(n_rings, x)
   f_NADPH <- f_NADPH(n_rings, x)
-  f_FMN <- f_FMN(n_rings, x)
+  f_FAD <- f_FAD(n_rings, x)
   f_x <- f_x(n_rings, x)
-  alpha_W * f_W + alpha_x * f_x + alpha_ETC * alpha_NADPH * (f_NADPH + alpha_FMN_vs_NADPH * f_FMN) / (1 + k * (1 - XTD))
+  alpha_W * f_W + alpha_x * f_x + alpha_ETC * alpha_NADPH * (f_NADPH + alpha_FAD_vs_NADPH * f_FAD) / (1 + k * (1 - XTD))
 }
 
 # non-linear least squares fit of model
-#start_values <- list(alpha_NADPH = 0.1, alpha_FMN_vs_NADPH = 0.2, k = 0.1)
+#start_values <- list(alpha_NADPH = 0.1, alpha_FAD_vs_NADPH = 0.2, k = 0.1)
 set.seed(123)
-start_values <- list(alpha_NADPH = runif(1), alpha_FMN_vs_NADPH = runif(1), k = runif(1))
+start_values <- list(alpha_NADPH = runif(1), alpha_FAD_vs_NADPH = runif(1), k = runif(1))
 message("Fitting with random start values: ")
 print(start_values)
 fit_model_by_nls <- function(alpha_W, x) {
   nls(
-    ~(calculate_model_output(n_rings, XTD, alpha_W, x, alpha_NADPH, alpha_FMN_vs_NADPH, k) - alpha) * 1000, 
+    ~(calculate_model_output(n_rings, XTD, alpha_W, x, alpha_NADPH, alpha_FAD_vs_NADPH, k) - alpha) * 1000, 
     data = mutate(model_data, alpha_W = !!alpha_W, x = !!x),
     start = start_values
   )
@@ -281,10 +281,10 @@ fits_wide <- fits %>%
     alpha_NADPH_se = std.error_alpha_NADPH,
     alpha_NADPH_ci_2.5 = `2.5 %_alpha_NADPH`,
     alpha_NADPH_ci_97.5 = `97.5 %_alpha_NADPH`,
-    alpha_FMN_vs_NADPH = estimate_alpha_FMN_vs_NADPH,
-    alpha_FMN_vs_NADPH_se = std.error_alpha_FMN_vs_NADPH,
-    alpha_FMN_vs_NADPH_ci_2.5 = `2.5 %_alpha_FMN_vs_NADPH`,
-    alpha_FMN_vs_NADPH_ci_97.5 = `97.5 %_alpha_FMN_vs_NADPH`,
+    alpha_FAD_vs_NADPH = estimate_alpha_FAD_vs_NADPH,
+    alpha_FAD_vs_NADPH_se = std.error_alpha_FAD_vs_NADPH,
+    alpha_FAD_vs_NADPH_ci_2.5 = `2.5 %_alpha_FAD_vs_NADPH`,
+    alpha_FAD_vs_NADPH_ci_97.5 = `97.5 %_alpha_FAD_vs_NADPH`,
     k = estimate_k,
     k_se = std.error_k
   ) 
@@ -330,14 +330,14 @@ fits_alphas <-
   mutate(
     XTD = calculate_XTD(TD.hours),
     m_alpha = calculate_model_output(
-      n_rings, XTD, alpha_W, x, alpha_NADPH, alpha_FMN_vs_NADPH, k
+      n_rings, XTD, alpha_W, x, alpha_NADPH, alpha_FAD_vs_NADPH, k
     )
   ) 
 
 # standard deviation of residuals - recalculation to check
 fits_alphas %>% 
   filter(!is.na(alpha)) %>%
-  group_by(model_id, x, x_fct, alpha_W, alpha_NADPH, alpha_FMN_vs_NADPH, k, resid.permil) %>%
+  group_by(model_id, x, x_fct, alpha_W, alpha_NADPH, alpha_FAD_vs_NADPH, k, resid.permil) %>%
   summarize(
     # degrees of freedom based on the 3 parameter fits
     resid_recalc.permil = sqrt(sum((m_alpha * 1000 - alpha * 1000)^2) / (n() - 3)),
@@ -435,9 +435,9 @@ write_rds(NADPH_imbalances, "cache/NADPH_imbalances.rds")
 $$
 \begin{aligned}
 R_{NADPH} &= \alpha_{ETC} \cdot R_W \\
-R_{BP} &= \left( \alpha_W   f_{W} + \alpha_x  f_x \right) R_W + \left(\alpha_{NADPH} f_{NADPH} + \alpha_{FMN} f_{FMN} \right) R_{NADPH} \\
+R_{BP} &= \left( \alpha_W   f_{W} + \alpha_x  f_x \right) R_W + \left(\alpha_{NADPH} f_{NADPH} + \alpha_{FAD} f_{FAD} \right) R_{NADPH} \\
 \rightarrow \alpha_{BP/W} &= \alpha_W   f_{W} + \alpha_x  f_x + 
-  \left( \alpha_{NADPH} f_{NADPH} + \alpha_{FMN} f_{FMN} \right) \alpha_{ETC}
+  \left( \alpha_{NADPH} f_{NADPH} + \alpha_{FAD} f_{FAD} \right) \alpha_{ETC}
 
 \end{aligned}
 $$
