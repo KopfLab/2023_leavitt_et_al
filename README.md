@@ -1,4 +1,4 @@
-# Leavitt et al. (2021) supplemental
+# Leavitt et al. (2023) supplemental
 
 This repository holds data and supplementary source code for *W. Leavitt, S. H. Kopf, Y. Weber, B. Chiu, J. M. McFarlin, F. Elling, S. Hoeft-McCann, A. Pearson (submitted). Controls on the hydrogen isotope composition of tetraether lipids in a marine thaumarchaeon*.
 
