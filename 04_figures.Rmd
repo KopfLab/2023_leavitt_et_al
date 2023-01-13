@@ -52,10 +52,10 @@ internal_standard <- readxl::read_excel("data/internal_standard.xlsx") %>%
   arrange(amp2.mV)
 compounds <- readxl::read_excel("data/compounds.xlsx")
 metadata <- readxl::read_excel("data/metadata.xlsx")
-samples <- readr::read_rds("cache/samples_w_epsilons.rds") %>%
+samples_w_info <- readr::read_rds("cache/samples_w_epsilons.rds") %>%
   left_join(compounds, by = "compound") %>%
   left_join(metadata, by = c("organism", "growth"))
-samples_sum <- readr::read_rds("cache/samples_sum.rds") %>%
+samples_sum_w_info <- readr::read_rds("cache/samples_sum.rds") %>%
   left_join(compounds, by = "compound") %>%
   left_join(metadata, by = c("organism", "growth"))
 samples_ab_weighted_sum <- readr::read_rds("cache/samples_ab_weighted_sum.rds")
@@ -143,13 +143,18 @@ p_chroms
 ```{r "plot_data_overview", fig.width=6, fig.height=6, warning = FALSE}
 # plot data frame with shift ranges
 plot_df <- 
-  samples_sum %>%
+  samples_sum_w_info %>%
   mutate(
     shift = 3,
     TD.hours_min = min(TD.hours - (1.5 + parse_number(bp_short)) * shift),
     TD.hours_max = max(TD.hours - (1.5 + parse_number(bp_short)) * shift)
   ) %>%
-  ungroup()
+  ungroup() %>%
+  mutate(
+    eps_value = eps_weighted_mean.permil,
+    eps_error = eps_error.permil
+  )
+plot_reg <- filter(growth_regs, variable == "eps_weighted_mean.permil")
 
 # plot
 p_data <- 
@@ -178,7 +183,7 @@ p_data <-
     data = function(df) {
       df %>% select(organism, TD.hours_min, TD.hours_max) %>%
         unique() %>%
-        left_join(growth_regs, by = "organism") %>%
+        left_join(plot_reg, by = "organism") %>%
         mutate(
           fit_line = pmap(list(fit, TD.hours_min, TD.hours_max), function(fit, hrs_min, hrs_max) {
             fit_hrs <- seq(hrs_min, hrs_max, length.out = 10)
@@ -200,10 +205,12 @@ p_data <-
     data = function(df) {
       df %>% select(organism, TD.hours_min, TD.hours_max) %>%
         unique() %>%
-        left_join(growth_regs, by = "organism") %>%
+        left_join(plot_reg, by = "organism") %>%
         mutate(
-          label = sprintf("$\\overset{%.1f \\pm %.1f \U2030\\,/\\,hour}{R^2:\\,%.2f,\\,p-value:\\,%s}$", 
+          label = sprintf("$\\overset{%.2f \\pm %.2f \U2030\\,/\\,hour}{R^2:\\,%.2f,\\,p-value:\\,%s}$",
                           estimate, std.error, adj.r.squared, format_with_signif(p.value, 1)) %>%
+          # label = sprintf("$\\overset{%.2f \\pm %.2f \U2030\\,/\\,hour}{\\[%.2f; %.2f\\]\\,\U2030/hour}$",
+          #                 estimate, std.error, lci, uci) %>%
             latex2exp::TeX() %>% as.character()
         )
     },
@@ -215,8 +222,8 @@ p_data <-
     map = aes(
       x = TD.hours - (1.5 + parse_number(bp_short)) * shift, 
       color = bp_short,
-      ymin = eps_weighted_mean.permil -  eps_error.permil, 
-      ymax = eps_weighted_mean.permil +  eps_error.permil),
+      ymin = eps_value - eps_error, 
+      ymax = eps_value + eps_error),
     width = 1, show.legend = FALSE
   ) +
   # scales
@@ -243,10 +250,12 @@ p_data <-
     size = guide_legend(override.aes = list(shape = 21)), 
     shape = guide_legend(override.aes = list(size = 4))
   ) + 
+  # individual points
   geom_point(
     map = aes(
       x = TD.hours - (1.5 + parse_number(bp_short)) * shift, 
-      y = eps_weighted_mean.permil, 
+      y = eps_value, 
+      #y = eps_mean.permil,
       shape = bp_short, fill = bp_short),
     size = 5
   ) 
@@ -480,7 +489,7 @@ circle_radius <- 3
 
 # plot
 p_data_w_model <- 
-  samples_sum %>%
+  samples_sum_w_info %>%
   ggplot() +
   aes(x = TD.hours, y = eps_weighted_mean.permil, shape = bp_short, color = bp_short, fill = bp_short) +
   # error bars
@@ -536,6 +545,41 @@ p_data_w_model <-
   ) 
 
 p_data_w_model
+```
+
+## Peak size effect
+
+```{r "peak_size_effect", fig.width = 10, fig.height = 6, warning=FALSE}
+derived_params <- read_rds("cache/derived_params.rds")
+
+p_peak_size <- derived_params %>%
+  filter(mean_amp < 20) %>%
+  mutate(y = `bgrd / peak`, y_err = `bgrd / peak error`) %>%
+  select(analysis, y, y_err, ends_with("amp"), ends_with("area")) %>% 
+  pivot_longer(
+    cols = c(ends_with("area"), ends_with("amp")), 
+    names_to = c("name", "variable"), names_pattern = "(.*)_(.*)"
+  ) %>% 
+  pivot_wider() %>%
+  mutate(
+    variable = as_factor(variable) %>% 
+      fct_recode("mean amplitude (A) in V" = "amp", ",mean area (A) in Vs" = "area")
+  ) %>%
+  ggplot() +
+  aes(x = mean, y = y) +
+  geom_errorbar(map = aes(ymin = y - y_err, ymax = y + y_err), width = 0) + 
+  geom_errorbarh(map = aes(xmin = min, xmax = max), height = 0) +
+  geom_point(size = 4) +
+  facet_grid(~variable, scales = "free_x", switch = "x") + 
+  scale_y_continuous(labels = function(x) sprintf("%.0f%%", 100 * x)) +
+  theme_figure() +
+  theme(
+    strip.placement = "outside",
+    strip.background = element_blank()
+  ) +
+  labs(x = NULL, y = latex2exp::TeX("$\\frac{A_{bgrd}}{A_{peak}}$"))
+
+p_peak_size
 ```
 
 ## Data calibration summary
@@ -601,7 +645,6 @@ p_calibs
 
 ## Absolute error estimates
 
-
 ```{r "plot_abs_errors", fig.width = 8, fig.height = 6, warning=FALSE}
 # create estimator for absolute error based on the internal standard
 abs_err_model <- loess(
@@ -649,7 +692,7 @@ p_errors
 ```{r "plot_all_data_points", fig.width=8, fig.height=8, warning=FALSE}
 # data plot
 p_all_data_points <- 
-  samples %>%
+  samples_w_info %>%
   ggplot() +
   aes(amp2.mV/1000, corrected_d2H.permil, fill = bp_short, shape = bp_short) + 
   # errrors
@@ -684,7 +727,7 @@ p_all_data_points
 ```{r "plot_all_data_density", fig.width=6, fig.height=4, warning = FALSE}
 # density plot
 p_all_data_density <- 
-  samples %>%
+  samples_w_info %>%
   ggplot() +
   aes(y = corrected_d2H.permil, color = compound) +
   # data
@@ -760,7 +803,7 @@ p_all_data
 
 ```{r "plot_rel_abundances", fig.width=6, fig.height=5}
 p_relab <- 
-  samples_sum %>%
+  samples_sum_w_info %>%
   ggplot() +
   aes(growth, rel_abundance_mean, fill = bp_short) +
   geom_bar(stat = "identity", position = "stack", width = 0.9) +
@@ -830,8 +873,14 @@ plot_grid(
 
 ## Figure S2
 
-```{r "figure_S2", fig.width = 8, fig.height = 7, warning=FALSE}
-p_calibs
+```{r "figure_S2", fig.width = 8, fig.height = 10.5, warning=FALSE}
+# combine all data with chroms and rel. abundances
+plot_grid(
+  p_peak_size,
+  p_calibs + theme(legend.position = "left"),
+  ncol = 1, rel_heights = c(4, 9),
+  labels = c("A", "B")
+)
 ```
 
 ## Figure S3

@@ -97,8 +97,7 @@ f_x <- function(nr, x) n_x(x) / n_BP(nr)
 # H accounting calculations
 H_accounting <- 
   tibble(
-    # FIXME: scenarios but with GGR H instead of FD
-    scenario = c("Scenario 2", "Scenario 4"),
+    scenario = c("no water ex", "max water ex"),
     x = c(0, 1)
   ) %>% 
   crossing(select(readxl::read_excel("data/compounds.xlsx"), bp_short, n_rings)) %>%
@@ -144,8 +143,7 @@ Parametrizing $f_L$ (NADH loss terms) with doubling time:
 $$
 \begin{aligned}
 f_L &= \frac{\phi_{L}}{\phi_{ETC}} = 1 - \frac{\phi_{TH}}{\phi_{ETC}} = 1 - f_N \\
-f_L &= \lambda \cdot (1 - X_{TD}) \\
-\text{B} &= \frac{- \phi_{NADH\rightarrow NADPH}}{\phi_{ETC}} = -f_N = f_L - 1
+f_L &= \lambda \cdot (1 - X_{TD}) 
 \end{aligned}
 $$
 
@@ -199,6 +197,7 @@ model_data <- readr::read_rds("cache/samples_sum.rds") %>%
   left_join(compounds, by = "compound") %>%
   left_join(metadata, by = c("organism", "growth")) %>%
   select(bp_short, n_rings, eps = eps_weighted_mean.permil, growth, TD.hours) %>%
+  #select(bp_short, n_rings, eps = eps_unweighted_mean.permil, growth, TD.hours) %>%
   mutate(
     alpha = eps/1000 + 1,
     XTD = calculate_XTD(TD.hours)
@@ -365,26 +364,29 @@ write_rds(fits_alphas_sum, "cache/fits_alphas_sum.rds")
 # calculate model ring enrichments
 fits_ring_enrichments <-
   fits_alphas %>%
-  select(model_id, n_rings, TD.hours, m_alpha) %>%
-  { full_join(., ., by = c("model_id", "TD.hours"))  } %>%
+  select(x_fct, alpha_W, model_id, n_rings, TD.hours, m_alpha) %>%
+  { full_join(., select(., -x_fct, -alpha_W), by = c("model_id", "TD.hours"))  } %>%
   filter(n_rings.x > n_rings.y) %>%
   mutate(
    D_eps_per_ring = 1000 * (m_alpha.y - m_alpha.x)/(n_rings.y - n_rings.x)
   ) %>%
-  group_by(n_rings.x) %>%
+  group_by(x_fct, alpha_W, n_rings.x) %>%
   summarize(
     D_eps_per_ring_sd = sd(D_eps_per_ring),
     D_eps_per_ring_median = median(D_eps_per_ring),
+    D_eps_per_ring_min = min(D_eps_per_ring),
+    D_eps_per_ring_max = max(D_eps_per_ring),
     D_eps_per_ring = mean(D_eps_per_ring),
     .groups = "drop"
   )
 
 # overall
 fits_ring_enrichments %>%
+  group_by(x_fct, alpha_W) %>%
   summarize(
     permil_per_ring_mean = mean(D_eps_per_ring),
-    permil_per_ring_median = median(D_eps_per_ring),
-    permil_per_ring_sd = sd(D_eps_per_ring)
+    permil_per_ring_min = min(D_eps_per_ring_min),
+    permil_per_ring_max = max(D_eps_per_ring_max)
   )
 ```
 
@@ -393,8 +395,8 @@ fits_ring_enrichments %>%
 ```{r}
 # calculate model growth regressions
 fits_growth_regs <- 
-  fits_alphas_sum %>%
-  nest(data = -c(bp_short, n_rings)) %>%
+  fits_alphas %>%
+  nest(data = -c(x_fct, alpha_W, bp_short, n_rings)) %>%
   mutate(
     fit = map(data, ~lm(m_alpha ~ TD.hours, data = .x)),
     estimates = map(fit, broom::tidy)
@@ -408,39 +410,9 @@ fits_growth_regs %>%
   summarize(
     permil_per_hour_mean = 1000 * mean(estimate),
     permil_per_hour_median= 1000 * median(estimate),
-    permil_per_hour_sd = 1000 * sd(estimate)
+    permil_per_hour_sd = 1000 * sd(estimate),
+    permil_per_hour_min = 1000 * min(estimate),
+    permil_per_hour_max = 1000 * max(estimate)
   )
 ```
-
-## NADPH imbalance
-
-```{r}
-# calculate NADPh imbalance based on the alpha_TH mid value
-NADPH_imbalances <- 
-  fits_wide_w_lambdas %>%
-  crossing(metadata) %>%
-  mutate(
-    XTD = calculate_XTD(TD.hours),
-    fL = lambda * (1 - XTD),
-    NADPH_imb = fL - 1
-  )
-
-# save in cache
-write_rds(NADPH_imbalances, "cache/NADPH_imbalances.rds")
-```
-
-
-# DRAFT literature data
-
-$$
-\begin{aligned}
-R_{NADPH} &= \alpha_{ETC} \cdot R_W \\
-R_{BP} &= \left( \alpha_W   f_{W} + \alpha_x  f_x \right) R_W + \left(\alpha_{NADPH} f_{NADPH} + \alpha_{FAD} f_{FAD} \right) R_{NADPH} \\
-\rightarrow \alpha_{BP/W} &= \alpha_W   f_{W} + \alpha_x  f_x + 
-  \left( \alpha_{NADPH} f_{NADPH} + \alpha_{FAD} f_{FAD} \right) \alpha_{ETC}
-
-\end{aligned}
-$$
-
-# TODO: fit these data with variable fw and fNADPH (fmn somewhat fixed, NADPH assuming minimum form MVA pathway, fx = 0). 
 

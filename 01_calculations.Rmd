@@ -20,6 +20,7 @@ editor_options:
 # packages
 library(rlang)
 library(tidyverse) # general data wrangling and plotting
+library(isoprocessor)
 
 # custom funtions
 source("scripts/error_propagation.R")
@@ -57,6 +58,99 @@ write_rds(chromatograms, "cache/chromatograms.rds")
 
 # Calculations
 
+## Peak-size dependence
+
+Mass balance with a background component:
+
+$$
+\begin{aligned}
+R_{peak} &= \frac{A_{peak} - A_{bgrd}}{A_{peak}} R_{analyte} + \frac{A_{bgrd}}{A_{peak}} R_{bgrd} \\
+\delta_{peak/H2} &= \frac{R_{peak}}{R_{H2}} - 1 \\
+  &= \left[ 
+    \frac{A_{peak} - A_{bgrd}}{A_{peak}} \frac{R_{analyte}}{R_{VSMOW}} + 
+      \frac{A_{bgrd}}{A_{peak}} \frac{R_{bgrd}}{R_{VSMOW}}
+    \right] \cdot \frac{R_{VSMOW}}{R_{H2}} - 1 \\
+  &= \left[ 
+    \frac{A_{peak} - A_{bgrd}}{A_{peak}} \left( \delta_{analyte/VSMOW} + 1 \right) + 
+      \frac{A_{bgrd}}{A_{peak}} \left( \delta_{bgrd/VSMOW} + 1 \right)
+    \right] \cdot \frac{R_{VSMOW}}{R_{H2}} - 1 \\
+  &= \frac{R_{VSMOW}}{R_{H2}} \delta_{analyte/VSMOW} 
+  - \frac{R_{VSMOW}}{R_{H2}} \frac{A_{bgrd}}{A_{peak}} \delta_{analyte/VSMOW} 
+  +  \frac{R_{VSMOW}}{R_{H2}} \cdot \frac{A_{bgrd}}{A_{peak}} \delta_{bgrd/VSMOW} \\
+  &\;\;\;\; + \frac{R_{VSMOW}}{R_{H2}} - 1
+\end{aligned}
+$$
+
+For individual standard analyses, all peaks have similar amplitudes/areas and we can use a univariate linear regression with $\delta_{analyte/VSMOW}$ as the sole dependent variable to approximate the above equation:
+
+$$
+\begin{aligned}
+\delta_{peak/H2} &= \beta_1 \cdot \delta_{analyte/VSMOW} + \beta_0
+\end{aligned}
+$$
+
+with: 
+
+$$
+\begin{aligned}
+\beta_0 &=  \frac{R_{VSMOW}}{R_{H2}}\frac{A_{bgrd}}{A_{peak}} \delta_{bgrd/VSMOW}  + \frac{R_{VSMOW}}{R_{H2}} - 1 \\
+\beta_1 &= \frac{R_{VSMOW}}{R_{H2}}\left(1 - \frac{A_{bgrd}}{A_{peak}} \right)
+\end{aligned}
+$$
+
+leading to estimates for $\delta_{H2/VSMOW}$ and $\frac{A_{bgrd}}{A_{peak}}$ from the $\beta_0$ and $\beta_1$ equations.
+
+$$
+\begin{aligned}
+
+\delta_{H2/VSMOW} &= \frac{1}{R_{VSMOW}/R_{H2}} - 1 = 
+  \frac{- \beta_0 + \delta_{bgrd} \cdot (1 - \beta_1) }{1 + \beta_0 + \delta_{bgrd} \cdot \beta_1} 
+  \approx \frac{-\beta_0}{1 + \beta_0} \\
+\frac{A_{bgrd}}{A_{peak}} &= \frac{1 + \beta_0 - \beta_1}{1 + \beta_0 + \delta_{bgrd} \cdot \beta_1} \approx 1 - \frac{\beta_1}{1 + \beta_0} 
+\end{aligned}
+$$
+
+```{r}
+calc_d2H_vs_VSMOW <- rlang::expr(-value_b0/(1 + value_b0/1000))
+calc_percent_bgrd <- rlang::expr(1 - value_b1 / (1 + value_b0/1000))
+
+derived_params <- 
+  readxl::read_excel("data/calibration_standards.xlsx") %>%
+  filter(calibration == "model.amp") %>%
+  group_by(analysis) %>%
+  mutate(
+    mean_area = mean(area_all.Vs), min_area = min(area_all.Vs), max_area = max(area_all.Vs),
+    mean_amp = mean(amp2.mV)/1000, min_amp = min(amp2.mV)/1000, max_amp = max(amp2.mV)/1000
+  ) %>%
+  ungroup() %>%
+  mutate(is_std_peak = TRUE) %>%
+  iso_prepare_for_calibration(group_by = analysis) %>%
+  iso_generate_calibration(
+    # simple direct calibration model
+    model = lm(raw_d2H.permil ~ true_d2H.permil), 
+    min_n_datapoints = 4
+  ) %>%
+  # calculate derived parameters
+  iso_get_calibration_data(
+    select = c(mean_area, min_area, max_area, mean_amp, min_amp, max_amp)
+  ) %>%
+  iso_get_calibration_parameters(
+    select_from_coefs = c(term, estimate, std.error),
+    select_from_summary = c()
+  ) %>%
+  mutate(term = case_when(term == "(Intercept)" ~ "b0", term == "true_d2H.permil" ~ "b1")) %>%
+  rename(value = estimate, se = std.error) %>%
+  pivot_wider(names_from = term, values_from = c(value, se)) %>%
+  mutate(
+    `d2H H2/VSMOW [permil]` = !!calc_d2H_vs_VSMOW,
+    `d2H H2/VSMOW [permil] error` = propagate_error(!!calc_d2H_vs_VSMOW, dvalue_b0 = se_b0),
+    `bgrd / peak` = !!calc_percent_bgrd,
+    `bgrd / peak error` = propagate_error(!!calc_percent_bgrd, dvalue_b0 = se_b0, dvalue_b1 = se_b1)
+  )
+
+write_rds(derived_params, "cache/derived_params.rds")
+```
+
 ## Relative abundances
 
 ```{r}
@@ -72,7 +166,6 @@ samples_w_rel_abundances <-
   ungroup() %>%
   relocate(all_phytanes, rel_abundance, .before = raw_d2H.permil)
 ```
-
 
 ## Sample error estimates
 
@@ -199,6 +292,11 @@ samples_sum <- samples_w_epsilons %>%
   # summarize
   summarize(
     n_analyses = max(n_analyses),
+    # unweighted means and sdevs
+    d2H_unweighted_mean.permil = mean(corrected_d2H.permil),
+    d2H_unweighted_sdev.permil = sd(corrected_d2H.permil),
+    eps_unweighted_mean.permil = mean(eps_2H_lipid_water.permil),
+    eps_unweighted_sdev.permil = sd(eps_2H_lipid_water.permil),
     # calculate d2H weighted mean
     d2H_weighted_mean.permil = sum(d2H_norm_weights * corrected_d2H.permil),
     # calculate d2H weighted standard deviation
@@ -263,18 +361,35 @@ write_rds(samples_sum, "cache/samples_sum.rds")
 ```{r}
 # calculate ring difference (for each sample and biphytanes the average difference to all other biphytanes with fewer rings)
 ring_enrichments <- samples_sum %>%
-  select(organism, compound, growth, eps_weighted_mean.permil) %>%
+  select(organism, compound, growth, eps_weighted_mean.permil, eps_unweighted_mean.permil) %>%
   { full_join(., ., by = c("organism", "growth"))  } %>%
   filter(parse_number(compound.y) > parse_number(compound.x)) %>%
   mutate(
     label = sprintf("BP-%.0f vs. %.0f", parse_number(compound.y), parse_number(compound.x)),
-    D_eps_per_ring = (eps_weighted_mean.permil.y - eps_weighted_mean.permil.x)/(parse_number(compound.y) - parse_number(compound.x))
+    D_eps_per_ring = (eps_weighted_mean.permil.y - eps_weighted_mean.permil.x)/
+      (parse_number(compound.y) - parse_number(compound.x)),
+    D_eps_per_ring_unweighted = (eps_unweighted_mean.permil.y - eps_unweighted_mean.permil.x)/
+      (parse_number(compound.y) - parse_number(compound.x))
   ) %>%
-  select(organism, growth, compound = compound.y, label, D_eps_per_ring) %>%
+  rename(compound = compound.y) %>%
   # summarize for each compound
   group_by(organism, growth, compound) %>%
-  summarize(D_eps_per_ring = mean(D_eps_per_ring)) %>%
+  summarize(
+    D_eps_per_ring = mean(D_eps_per_ring),
+    D_eps_per_ring_unweighted = mean(D_eps_per_ring_unweighted), 
+    .groups = "drop"
+  ) %>%
   ungroup()
+
+# mean ring enrichment
+message("Mean ring enrichments: ")
+ring_enrichments %>% 
+  summarize(
+    mean_ring_enrichment = mean(D_eps_per_ring) %>% round(1), 
+    sd = sd(D_eps_per_ring) %>% round(1),
+    mean_ring_enrichment_unweighted = mean(D_eps_per_ring_unweighted) %>% round(1),
+    sd_unweighted = sd(D_eps_per_ring_unweighted) %>% round(1),
+  )
 
 # save in cache
 write_rds(ring_enrichments, "cache/ring_enrichments.rds")
@@ -285,16 +400,24 @@ write_rds(ring_enrichments, "cache/ring_enrichments.rds")
 ```{r}
 growth_regs <- 
   samples_sum %>%
+  pivot_longer(
+    cols = c(eps_unweighted_mean.permil, eps_weighted_mean.permil),
+    names_to = "variable"
+  ) %>%
   left_join(metadata, by = c("organism", "growth")) %>%
-  nest(data = -organism) %>%
+  nest(data = c(-organism, -variable)) %>%
   mutate(
-    fit = map(data, ~lm(eps_weighted_mean.permil ~ TD.hours, weights = rel_abundance_mean, data = .x)),
+    fit = map(data, ~lm(value ~ TD.hours, weights = rel_abundance_mean, data = .x)),
     estimates = map(fit, broom::tidy),
     summary = map(fit, broom::glance)
   ) %>%
   unnest(estimates) %>% 
-  rename(term_stat = statistic, term_pval = p.value) %>% 
   filter(term == "TD.hours") %>%
+  mutate(
+    lci = map_dbl(fit, ~confint(.x)["TD.hours", 1]),
+    uci = map_dbl(fit, ~confint(.x)["TD.hours", 2])
+  ) %>%
+  select(1:std.error, lci, uci, summary) %>% 
   unnest(summary)
 
 # save in cache
@@ -304,11 +427,15 @@ write_rds(growth_regs, "cache/growth_regs.rds")
 message("Growth regression: ")
 growth_regs %>%
   mutate(
-    permil_per_hour = round(estimate, 1), permil_per_hour_err = round(std.error, 1), 
-    permil_per_day = round(estimate * 24, 1), permil_per_day_err = round(std.error * 24, 1),
+    permil_per_hour = round(estimate, 2), 
+    permil_per_hour_err = round(std.error, 2), 
+    permil_per_hour_lci = round(lci, 2),
+    permil_per_hour_uci = round(uci, 2), 
+    permil_per_day = round(estimate * 24, 2), 
+    permil_per_day_err = round(std.error * 24, 2),
     r2 = round(adj.r.squared, 2), pval = signif(p.value, 3)
   ) %>%
-  select(organism, starts_with("permil_per"), r2, pval)
+  select(organism, variable, starts_with("permil_per"), r2, pval)
 ```
 
 
