@@ -4,9 +4,7 @@ This repository holds data and supplementary source code for *W. Leavitt, S. H. 
 
 ## What can I do with this code? <a href="https://creativecommons.org/licenses/by/4.0/"><img src="https://mirrors.creativecommons.org/presskit/buttons/88x31/png/by.png" align = "right" width = "100"/></a>
 
-We hope that this code, or any part of it, might prove useful to other members of the scientific community interested in the subject matter. This repository is released under a [Creative Commons BY (CC-BY)](https://creativecommons.org/licenses/by/4.0/) license, which means all code can be shared and adapted for any purpose as long as appropriate credit is given. See [Attribution section](https://creativecommons.org/licenses/by/4.0/) for details. 
-
-Most of the code is provided in [R Markdown](http://rmarkdown.rstudio.com/) (see below) with some parts available in [Matlab](https://www.mathworks.com/products/matlab.html). 
+We hope that this code, or any part of it, might prove useful to other members of the scientific community interested in the subject matter. This repository is released under a [Creative Commons BY (CC-BY)](https://creativecommons.org/licenses/by/4.0/) license, which means all code can be shared and adapted for any purpose as long as appropriate credit is given. See [Attribution section](https://creativecommons.org/licenses/by/4.0/) for details. Most of the code is provided in [R Markdown](http://rmarkdown.rstudio.com/) (see below).
 
 ## What is R Markdown?
 
