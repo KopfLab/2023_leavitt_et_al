@@ -10,9 +10,7 @@ output:
     toc_float: yes
     toc_depth: 3
     code_folding: show
-  word_document:
-    toc: yes
-    toc_depth: '3'
+    standalone: true
 editor_options:
   chunk_output_type: console
 ---

@@ -10,6 +10,7 @@ output:
     toc_float: true
     toc_depth: 3
     code_folding: show
+    standalone: true
 editor_options:
   chunk_output_type: console # switch to 'inline' if preferred
 ---
