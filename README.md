@@ -1,6 +1,6 @@
 # Leavitt et al. (2023) supplemental
 
-This repository holds data and supplementary source code for *W. Leavitt, S. H. Kopf, Y. Weber, B. Chiu, J. M. McFarlin, F. Elling, S. Hoeft-McCann, A. Pearson (submitted). Controls on the hydrogen isotope composition of tetraether lipids in a marine thaumarchaeon*.
+This repository holds data and supplementary source code for *W.D. Leavitt, S.H. Kopf, Y. Weber, B. Chiu, J.M. McFarlin, F.J. Elling, S. Hoeft-McCann, A. Pearson. Controls on the hydrogen isotope composition of tetraether lipids in an autotrophic ammonia-oxidizing marine archaeon. Geochimica et Cosmochimica Acta, Volume 352 (194-210), 2023*.
 
 ## What can I do with this code? <a href="https://creativecommons.org/licenses/by/4.0/"><img src="https://mirrors.creativecommons.org/presskit/buttons/88x31/png/by.png" align = "right" width = "100"/></a>
 
